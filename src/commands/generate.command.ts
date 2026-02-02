@@ -2,9 +2,11 @@ import { Command, CommandRunner, Option } from "nest-commander";
 import { writeFileSync, readFileSync, existsSync } from "fs";
 import ora from "ora";
 import fetch from "node-fetch";
-import { resolve } from "path";
+import { resolve, join } from "path";
 import { homedir } from "os";
-import { join } from "path";
+import { generateImage } from "ai";
+import { createOpenAI } from "@ai-sdk/openai";
+import { createGoogleGenerativeAI } from "@ai-sdk/google";
 
 interface GenerateCommandOptions {
   prompt?: string;
@@ -30,12 +32,8 @@ interface Credentials {
  */
 const MODEL_CONFIGS = {
   openrouter: {
-    primary: "black-forest-labs/flux-1.1-pro",
-    fallbacks: [
-      "black-forest-labs/flux-pro",
-      "openai/dall-e-3",
-      "stability-ai/stable-diffusion-xl",
-    ],
+    primary: "google/gemini-3-pro-image-preview",
+    fallbacks: ["google/gemini-2.5-flash-image-preview"],
   },
   openai: {
     primary: "dall-e-3",
@@ -117,10 +115,10 @@ export class GenerateCommand extends CommandRunner {
     const spinner = json ? null : ora("Generating image...").start();
 
     try {
-      let imageUrl: string;
+      let imageBuffer: Buffer;
 
       if (aiProvider === "openrouter") {
-        imageUrl = await this.generateWithFallback(
+        imageBuffer = await this.generateWithFallback(
           prompt,
           size,
           apiKey,
@@ -129,7 +127,7 @@ export class GenerateCommand extends CommandRunner {
           spinner
         );
       } else if (aiProvider === "openai") {
-        imageUrl = await this.generateWithFallback(
+        imageBuffer = await this.generateWithFallback(
           prompt,
           size,
           apiKey,
@@ -138,7 +136,7 @@ export class GenerateCommand extends CommandRunner {
           spinner
         );
       } else if (aiProvider === "google") {
-        imageUrl = await this.generateWithFallback(
+        imageBuffer = await this.generateWithFallback(
           prompt,
           size,
           apiKey,
@@ -152,16 +150,8 @@ export class GenerateCommand extends CommandRunner {
       }
 
       // ─────────────────────────────────────────────────────────────────────
-      // Download and Save Image
+      // Save Image
       // ─────────────────────────────────────────────────────────────────────
-      if (spinner) spinner.text = "Downloading image...";
-
-      const imageResponse = await fetch(imageUrl);
-      if (!imageResponse.ok) {
-        throw new Error(`Failed to download image: ${imageResponse.statusText}`);
-      }
-
-      const imageBuffer = await imageResponse.buffer();
       const outputPath = resolve(output);
       writeFileSync(outputPath, imageBuffer);
 
@@ -219,7 +209,7 @@ export class GenerateCommand extends CommandRunner {
       warn: (msg: string) => void;
       isSpinning?: boolean;
     } | null
-  ): Promise<string> {
+  ): Promise<Buffer> {
     const modelsToTry = [config.primary, ...config.fallbacks].filter(
       (model): model is string => model !== null
     );
@@ -235,14 +225,14 @@ export class GenerateCommand extends CommandRunner {
           spinner.text = `Generating image with ${modelName}... (attempt ${i + 1}/${modelsToTry.length})`;
         }
 
-        const imageUrl = await this.generateWithModel(prompt, size, apiKey, provider, model);
+        const imageBuffer = await this.generateWithModel(prompt, size, apiKey, provider, model);
 
         if (spinner && i > 0) {
           // Only show fallback message if we had to fall back
           spinner.info(`Successfully generated with fallback model: ${model}`);
         }
 
-        return imageUrl;
+        return imageBuffer;
       } catch (error) {
         lastError = error as Error;
 
@@ -265,6 +255,20 @@ export class GenerateCommand extends CommandRunner {
   }
 
   /**
+   * get the model configuration for the AI SDK
+   */
+  private getImageModel(provider: string, apiKey: string, model: string) {
+    if (provider === "openai") {
+      const openai = createOpenAI({ apiKey });
+      return openai.image(model);
+    } else if (provider === "google") {
+      const google = createGoogleGenerativeAI({ apiKey });
+      return google.image(model);
+    }
+    throw new Error(`Provider ${provider} not supported via AI SDK`);
+  }
+
+  /**
    * Generate image using a specific model
    */
   private async generateWithModel(
@@ -273,20 +277,12 @@ export class GenerateCommand extends CommandRunner {
     apiKey: string,
     provider: "openrouter" | "openai" | "google",
     model: string
-  ): Promise<string> {
-    let apiUrl: string;
-    let headers: Record<string, string>;
-    let body: Record<string, unknown>;
-
-    if (provider === "google") {
-      // Google Imagen image generation
-      apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:predict`;
-      headers = {
-        "Content-Type": "application/json",
-        "x-goog-api-key": apiKey,
-      };
-
-      // Parse aspect ratio from size (e.g., "1024x1024" -> "1:1")
+  ): Promise<Buffer> {
+    // ─────────────────────────────────────────────────────────────────────
+    // OPENROUTER (Via Fetch / Chat Completions)
+    // ─────────────────────────────────────────────────────────────────────
+    if (provider === "openrouter") {
+      // Parse aspect ratio from size
       const [width, height] = size.split("x").map(Number);
       let aspectRatio = "1:1";
       if (width && height) {
@@ -295,134 +291,77 @@ export class GenerateCommand extends CommandRunner {
         aspectRatio = `${width / divisor}:${height / divisor}`;
       }
 
-      body = {
-        instances: [
-          {
-            prompt,
-          },
-        ],
-        parameters: {
-          sampleCount: 1,
-          aspectRatio,
+      const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+          "HTTP-Referer": "https://moltbr.bricks-studio.ai",
+          "X-Title": "Moltbr CLI",
         },
-      };
-    } else if (provider === "openrouter") {
-      // OpenRouter supports multiple image generation models
-      apiUrl = "https://openrouter.ai/api/v1/images/generations";
-      headers = {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-        "HTTP-Referer": "https://moltbr.bricks-studio.ai",
-        "X-Title": "Moltbr CLI",
-      };
+        body: JSON.stringify({
+          model: model,
+          messages: [
+            {
+              role: "user",
+              content: prompt,
+            },
+          ],
+          // Specific to Gemini/OpenRouter multimodal
+          modalities: ["image", "text"],
+          image_config: {
+            aspect_ratio: aspectRatio,
+            // image_size: "4K", // Optional based on snippet, but maybe risky for all models
+          },
+        }),
+      });
 
-      // Different models have different request formats
-      if (model.includes("flux")) {
-        // Flux models use image_size instead of size
-        const [width, height] = size.split("x").map(Number);
-        body = {
-          prompt,
-          model,
-          n: 1,
-          width,
-          height,
-        };
-      } else if (model.includes("dall-e")) {
-        // DALL-E models use standard OpenAI format
-        body = {
-          prompt,
-          model,
-          n: 1,
-          size,
-        };
-      } else {
-        // Default format for other models (Stable Diffusion, etc.)
-        const [width, height] = size.split("x").map(Number);
-        body = {
-          prompt,
-          model,
-          n: 1,
-          width,
-          height,
-        };
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(`OpenRouter API error: ${text}`);
       }
-    } else {
-      // OpenAI direct format
-      apiUrl = "https://api.openai.com/v1/images/generations";
-      headers = {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      };
-      body = {
-        prompt,
-        model,
-        n: 1,
-        size,
-      };
+
+      const result = (await response.json()) as any;
+
+      if (result.choices?.[0]?.message?.images?.[0]?.image_url?.url) {
+        const imageUrl = result.choices[0].message.images[0].image_url.url;
+
+        // If it's a URL, fetch it
+        if (imageUrl.startsWith("http")) {
+          const imgRes = await fetch(imageUrl);
+          const arrayBuffer = await imgRes.arrayBuffer();
+          return Buffer.from(arrayBuffer);
+        }
+
+        // If it's base64 data URI
+        if (imageUrl.startsWith("data:image")) {
+          const base64Data = imageUrl.split(",")[1];
+          return Buffer.from(base64Data, "base64");
+        }
+
+        throw new Error("Unknown image URL format");
+      }
+
+      throw new Error("No image generated from OpenRouter response");
     }
 
-    const response = await fetch(apiUrl, {
-      method: "POST",
-      headers,
-      body: JSON.stringify(body),
+    // ─────────────────────────────────────────────────────────────────────
+    // OPENAI / GOOGLE (Via AI SDK)
+    // ─────────────────────────────────────────────────────────────────────
+    const imageModel = this.getImageModel(provider, apiKey, model);
+
+    // Pass size as string directly as per SDK requirements.
+    // We cast to 'any' to avoid strict template literal validation errors
+    // since we know validSizes allows specifically "1024x1024" etc.
+    const { image } = await generateImage({
+      model: imageModel,
+      prompt,
+      n: 1,
+      size: size as any,
     });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      let errorMessage: string;
-
-      try {
-        const errorJson = JSON.parse(errorText);
-        errorMessage = errorJson.error?.message || errorJson.message || "Unknown error";
-      } catch {
-        errorMessage = errorText || `HTTP ${response.status} ${response.statusText}`;
-      }
-
-      throw new Error(`Image generation failed with ${model}: ${errorMessage}`);
-    }
-
-    if (provider === "google") {
-      // Google Imagen response format
-      const result = (await response.json()) as {
-        predictions?: Array<{
-          bytesBase64Encoded?: string;
-          mimeType?: string;
-        }>;
-      };
-
-      if (!result.predictions || !result.predictions[0]) {
-        throw new Error("Invalid response from Google Imagen API");
-      }
-
-      const prediction = result.predictions[0];
-      if (!prediction.bytesBase64Encoded) {
-        throw new Error("No image data in Google Imagen response");
-      }
-
-      // Return base64 image as data URL
-      const mimeType = prediction.mimeType || "image/png";
-      return `data:${mimeType};base64,${prediction.bytesBase64Encoded}`;
-    } else {
-      // OpenRouter/OpenAI response format
-      const result = (await response.json()) as {
-        data?: Array<{ url?: string; b64_json?: string }>;
-      };
-
-      // Extract image URL from response
-      if (!result.data || !result.data[0]) {
-        throw new Error("Invalid response from image generation API");
-      }
-
-      // Some APIs return b64_json instead of url
-      if (result.data[0].url) {
-        return result.data[0].url;
-      } else if (result.data[0].b64_json) {
-        // Convert base64 to data URL
-        return `data:image/png;base64,${result.data[0].b64_json}`;
-      } else {
-        throw new Error("No image URL or data in response");
-      }
-    }
+    // The image object from 'ai' SDK contains the base64 string
+    return Buffer.from(image.base64, "base64");
   }
 
   @Option({

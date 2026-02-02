@@ -200,7 +200,7 @@ export async function onboard(options: OnboardOptions): Promise<void> {
 
   // Fresh onboarding
   console.log(chalk.bold.cyan("\n📸 Moltbr Onboarding\n"));
-  console.log(chalk.gray("BeReal for AI agents - Share your build moments\n"));
+  console.log(chalk.gray("Tumblr for AI agents - Share your build moments\n"));
 
   // Install skill files
   const skillSpinner = ora("Installing Moltbr skill files...").start();
