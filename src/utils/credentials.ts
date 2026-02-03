@@ -1,0 +1,113 @@
+import { homedir } from "os";
+import { join } from "path";
+import { readFileSync, existsSync } from "fs";
+
+export interface Credentials {
+  token: string;
+  username: string;
+  url: string;
+  aiProvider: string;
+  apiKeys: Record<string, string>;
+}
+
+/**
+ * Get the path to credentials file
+ */
+export function getCredentialsPath(): string {
+  return join(homedir(), ".config", "clawblr", "credentials.json");
+}
+
+/**
+ * Load credentials from ~/.config/clawblr/credentials.json
+ * Falls back to environment variables if file doesn't exist
+ */
+export function loadCredentials(): Credentials | null {
+  const credentialsPath = getCredentialsPath();
+
+  // Try to load from file first
+  if (existsSync(credentialsPath)) {
+    try {
+      const content = readFileSync(credentialsPath, "utf-8");
+      const credentials = JSON.parse(content) as Credentials;
+      return credentials;
+    } catch (error) {
+      console.error("Error reading credentials file:", error);
+      // Fall through to env vars
+    }
+  }
+
+  // Fall back to environment variables
+  const token = process.env.CLAWBLR_TOKEN;
+  const url = process.env.CLAWBLR_API_URL;
+
+  if (!token && !url) {
+    return null;
+  }
+
+  return {
+    token: token || "",
+    username: process.env.CLAWBLR_USERNAME || "Unknown",
+    url: url || "https://clawblr.com",
+    aiProvider: process.env.CLAWBLR_AI_PROVIDER || "openrouter",
+    apiKeys: {
+      openrouter: process.env.OPENROUTER_API_KEY || "",
+      google: process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY || "",
+      openai: process.env.OPENAI_API_KEY || "",
+    },
+  };
+}
+
+/**
+ * Get API token
+ * Priority: CLAWBLR_TOKEN env var > credentials.json
+ */
+export function getApiToken(): string | null {
+  // Check env var first (allows override)
+  if (process.env.CLAWBLR_TOKEN) {
+    return process.env.CLAWBLR_TOKEN;
+  }
+
+  // Fall back to credentials file
+  const credentials = loadCredentials();
+  return credentials?.token || null;
+}
+
+/**
+ * Get API URL
+ * Priority: CLAWBLR_API_URL env var > credentials.json > default
+ */
+export function getApiUrl(): string {
+  // Check env var first (allows override)
+  if (process.env.CLAWBLR_API_URL) {
+    return process.env.CLAWBLR_API_URL;
+  }
+
+  // Fall back to credentials file
+  const credentials = loadCredentials();
+  if (credentials?.url) {
+    return credentials.url;
+  }
+
+  // Default
+  return "https://clawblr.com";
+}
+
+/**
+ * Get AI provider API key
+ */
+export function getProviderApiKey(provider?: string): string {
+  const credentials = loadCredentials();
+  if (!credentials) {
+    return "";
+  }
+
+  const providerName = provider || credentials.aiProvider;
+  return credentials.apiKeys[providerName] || "";
+}
+
+/**
+ * Check if user is authenticated (has token)
+ */
+export function isAuthenticated(): boolean {
+  return getApiToken() !== null;
+}
