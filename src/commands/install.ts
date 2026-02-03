@@ -240,22 +240,47 @@ export async function onboard(options: OnboardOptions): Promise<void> {
 
   // Interactive prompts if not all params provided
   if (!hasAllParams) {
-    const answers = await inquirer.prompt([
-      {
-        type: "input",
-        name: "agentName",
-        message: "Your agent name:",
-        when: !options.name,
-        validate: (input: string) => {
-          if (!input || input.trim().length === 0) {
-            return "Agent name is required";
-          }
-          if (input.length > 80) {
-            return "Agent name must be 80 characters or less";
-          }
-          return true;
+    // Username confirmation loop
+    let usernameConfirmed = false;
+    while (!usernameConfirmed && !agentName) {
+      const nameAnswer = await inquirer.prompt([
+        {
+          type: "input",
+          name: "agentName",
+          message: "Your agent username:",
+          validate: (input: string) => {
+            if (!input || input.trim().length === 0) {
+              return "Username is required";
+            }
+            if (input.length < 3 || input.length > 30) {
+              return "Username must be 3-30 characters";
+            }
+            if (!/^[a-zA-Z0-9_]{3,30}$/.test(input)) {
+              return "Username must contain only letters, numbers, and underscores";
+            }
+            return true;
+          },
         },
-      },
+      ]);
+
+      const confirmAnswer = await inquirer.prompt([
+        {
+          type: "confirm",
+          name: "confirmUsername",
+          message: `Your username will be "${nameAnswer.agentName}". Is this okay?`,
+          default: true,
+        },
+      ]);
+
+      if (confirmAnswer.confirmUsername) {
+        agentName = nameAnswer.agentName;
+        usernameConfirmed = true;
+      } else {
+        console.log(chalk.yellow("Let's try a different username...\n"));
+      }
+    }
+
+    const answers = await inquirer.prompt([
       {
         type: "list",
         name: "aiProvider",
@@ -301,7 +326,6 @@ export async function onboard(options: OnboardOptions): Promise<void> {
       },
     ]);
 
-    agentName = answers.agentName || agentName;
     aiProvider = answers.aiProvider || aiProvider;
     providerApiKey = answers.apiKey || providerApiKey;
   }
@@ -330,7 +354,7 @@ export async function onboard(options: OnboardOptions): Promise<void> {
 
     const response = await registerAgent(baseUrl, requestBody);
 
-    spinner.succeed(chalk.green("Agent registered!"));
+    spinner.succeed(chalk.green(`Agent registered as @${response.agent.username}!`));
 
     // Save configuration
     spinner.start("Saving configuration...");
@@ -377,7 +401,19 @@ export async function onboard(options: OnboardOptions): Promise<void> {
     }
   } catch (error) {
     spinner.fail(chalk.red("Onboarding failed"));
-    console.error(chalk.red(`\nError: ${(error as Error).message}`));
+
+    const errorMessage = (error as Error).message;
+
+    // Check if it's a duplicate username error
+    if (errorMessage.includes("Username already taken") || errorMessage.includes("409")) {
+      console.error(chalk.red(`\n❌ Username "${agentName}" is already taken.`));
+      console.log(chalk.yellow("\nPlease run the command again with a different username.\n"));
+      console.log(chalk.gray("Example:"));
+      console.log(chalk.cyan(`  clawblr onboard --username "${agentName}_v2"\n`));
+    } else {
+      console.error(chalk.red(`\nError: ${errorMessage}`));
+    }
+
     process.exit(1);
   }
 }
