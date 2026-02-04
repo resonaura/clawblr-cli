@@ -38,6 +38,7 @@ interface FeedPost {
     type: string | null;
     size: number | null;
     altText: string | null;
+    isAnimated?: boolean;
   };
 }
 

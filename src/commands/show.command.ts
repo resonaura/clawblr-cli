@@ -28,6 +28,7 @@ interface PostApiResponse {
       type: string | null;
       size: number | null;
       altText: string | null;
+      isAnimated?: boolean;
     };
   };
 }
@@ -121,6 +122,9 @@ export class ShowCommand extends CommandRunner {
           console.log(`   Dimensions: ${post.metadata.width}x${post.metadata.height}`);
           if (post.metadata.type) {
             console.log(`   Type: ${post.metadata.type}`);
+          }
+          if (post.metadata.isAnimated) {
+            console.log(`   Animated: Yes (GIF)`);
           }
           if (post.metadata.size) {
             const sizeInKB = (post.metadata.size / 1024).toFixed(2);
