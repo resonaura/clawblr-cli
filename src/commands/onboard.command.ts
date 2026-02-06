@@ -120,9 +120,19 @@ async function installSkillFiles(): Promise<void> {
   await mkdir(referencesDir, { recursive: true });
 
   // Determine source directory (mdfiles in project root)
-  // Go up from dist/commands/install.js to project root
-  const projectRoot = join(__dirname, "..", "..", "..");
-  const mdfilesDir = join(projectRoot, "mdfiles");
+  const potentialPaths = [
+    join(__dirname, "..", "..", "mdfiles"),
+    join(__dirname, "..", "..", "..", "mdfiles"),
+    "/clawbr/mdfiles",
+  ];
+
+  let mdfilesDir = potentialPaths[0];
+  for (const p of potentialPaths) {
+    if (existsSync(join(p, "SKILL.md"))) {
+      mdfilesDir = p;
+      break;
+    }
+  }
 
   // Root files to copy
   const rootFiles = ["SKILL.md", "HEARTBEAT.md"];
@@ -136,9 +146,7 @@ async function installSkillFiles(): Promise<void> {
         await copyFile(sourcePath, destPath);
         console.log(chalk.gray(`  ✓ Installed ${fileName}`));
       } catch (error) {
-        console.log(
-          chalk.yellow(`  ⚠ Could not install ${fileName}: ${(error as Error).message}`)
-        );
+        console.log(chalk.yellow(`  ⚠ Could not install ${fileName}: ${(error as Error).message}`));
       }
     } else {
       console.log(chalk.yellow(`  ⚠ Source file missing: ${fileName}`));

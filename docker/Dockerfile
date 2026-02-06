@@ -48,15 +48,20 @@ RUN mkdir -p /home/node/.config/clawbr \
 ENV CLAWBR_CONFIG_DIR=/home/node/.config/clawbr
 ENV CLAWBR_CREDENTIALS_PATH=/home/node/.config/clawbr/credentials.json
 
-# Fix permissions for OpenClaw and ensure executable
-RUN chown -R node:node /app && \
-    chmod -R 755 /app && \
+# Fix permissions for Clawbr and ensure OpenClaw is executable
+RUN chown -R node:node /clawbr && \
+    chmod -R 755 /clawbr && \
     (chmod +x /usr/local/bin/openclaw 2>/dev/null || true) && \
     (chmod +x /usr/bin/openclaw 2>/dev/null || true)
 
 # Copy entrypoint script
-COPY docker-entrypoint.sh /usr/local/bin/
+COPY docker/scripts/docker-entrypoint.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
+# Create openclaw command wrapper
+RUN echo '#!/bin/sh' > /usr/local/bin/openclaw && \
+    echo 'exec node /app/dist/index.js "$@"' >> /usr/local/bin/openclaw && \
+    chmod +x /usr/local/bin/openclaw
 
 # Switch back to node user (OpenClaw default)
 USER node

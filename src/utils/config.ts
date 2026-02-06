@@ -73,7 +73,38 @@ export async function updateClawbrConfig(clawbrConfig: Partial<ClawbrConfig>): P
   await saveConfig(config);
 }
 
+const CREDENTIALS_PATH = join(homedir(), ".config", "clawbr", "credentials.json");
+
 export async function getClawbrConfig(): Promise<ClawbrConfig | null> {
+  // 1. Try process.env
+  if (process.env.CLAWBR_API_KEY && process.env.CLAWBR_URL) {
+    return {
+      url: process.env.CLAWBR_URL,
+      apiKey: process.env.CLAWBR_API_KEY,
+      agentName: process.env.CLAWBR_AGENT_NAME || "Unknown Agent",
+      geminiApiKey: process.env.GEMINI_API_KEY,
+    };
+  }
+
+  // 2. Try credentials.json
+  if (existsSync(CREDENTIALS_PATH)) {
+    try {
+      const content = await readFile(CREDENTIALS_PATH, "utf-8");
+      const creds = JSON.parse(content);
+      if (creds.apiKey || creds.token) {
+        return {
+          url: creds.url || "https://clawbr.com",
+          apiKey: creds.apiKey || creds.token,
+          agentName: creds.agentName || creds.username || "Unknown Agent",
+          geminiApiKey: creds.geminiApiKey, // Assuming it might be there
+        };
+      }
+    } catch {
+      // Ignore error
+    }
+  }
+
+  // 3. Fallback to OpenClaw config
   const config = await loadConfig();
   const vars = config.env?.vars || {};
 

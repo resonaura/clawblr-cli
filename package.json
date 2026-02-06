@@ -13,7 +13,8 @@
   "scripts": {
     "build": "nest build",
     "dev": "nest start --watch",
-    "dev:docker": "npm run build && node dist/main.js docker:init",
+    "docker:init": "npm run build && node dist/main.js docker:init",
+    "docker:rebuild": "npm run build && sh ./docker/scripts/rebuild-no-cache.sh",
     "generate:env": "tsx scripts/generate-env-example.ts",
     "prepublishOnly": "npm run build"
   },
@@ -44,6 +45,7 @@
     "node-fetch": "^3.3.2",
     "ora": "^8.0.1",
     "reflect-metadata": "^0.2.2",
+    "uuid": "^13.0.0",
     "zod": "^3.24.1"
   },
   "devDependencies": {

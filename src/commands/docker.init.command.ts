@@ -12,6 +12,7 @@ import { promisify } from "util";
 const execPromise = promisify(exec);
 import { registerAgent } from "../utils/api.js";
 import { createServer } from "net";
+import { v4 } from "uuid";
 
 interface AgentConfig {
   name: string;
@@ -66,12 +67,12 @@ export class DockerInitCommand extends CommandRunner {
     }
 
     // Check for existing configuration files
-    const hasDockerCompose = existsSync("docker-compose.yml");
+    const hasDockerCompose = existsSync("docker/docker-compose.yml");
     const hasEnvDocker = existsSync(".env.docker");
 
     if (hasDockerCompose && hasEnvDocker) {
       console.log(chalk.yellow("\n⚠️  Found existing configuration files:\n"));
-      console.log(chalk.gray("  - docker-compose.yml"));
+      console.log(chalk.gray("  - docker/docker-compose.yml"));
       console.log(chalk.gray("  - .env.docker\n"));
 
       const { resumeAction } = await inquirer.prompt([
@@ -100,9 +101,9 @@ export class DockerInitCommand extends CommandRunner {
 
         let composeContent = "";
         try {
-          composeContent = await readFile("docker-compose.yml", "utf-8");
+          composeContent = await readFile("docker/docker-compose.yml", "utf-8");
 
-          // Patch docker-compose.yml with correct BIND settings
+          // Patch docker/docker-compose.yml with correct BIND settings
           let modified = false;
 
           // Replace old HOST vars or missing checks with OPENCLAW_GATEWAY_BIND=ln (which means 0.0.0.0 basically)
@@ -163,7 +164,7 @@ export class DockerInitCommand extends CommandRunner {
           }
 
           if (modified) {
-            await writeFile("docker-compose.yml", composeContent, "utf-8");
+            await writeFile("docker/docker-compose.yml", composeContent, "utf-8");
           }
 
           const serviceMatches = composeContent.matchAll(/agent-(\w+):/g);
@@ -193,6 +194,24 @@ export class DockerInitCommand extends CommandRunner {
             const match = envContent.match(new RegExp(`${envPrefix}_TOKEN=(.+)`));
             if (match && match[1]) {
               agent.token = match[1].trim();
+            }
+
+            // Restore API Key and Provider
+            const openrouterMatch = envContent.match(
+              new RegExp(`${envPrefix}_OPENROUTER_KEY=(.+)`)
+            );
+            const geminiMatch = envContent.match(new RegExp(`${envPrefix}_GEMINI_KEY=(.+)`));
+            const openaiMatch = envContent.match(new RegExp(`${envPrefix}_OPENAI_KEY=(.+)`));
+
+            if (openrouterMatch && openrouterMatch[1]) {
+              agent.apiKey = openrouterMatch[1].trim();
+              agent.provider = "openrouter";
+            } else if (geminiMatch && geminiMatch[1]) {
+              agent.apiKey = geminiMatch[1].trim();
+              agent.provider = "google";
+            } else if (openaiMatch && openaiMatch[1]) {
+              agent.apiKey = openaiMatch[1].trim();
+              agent.provider = "openai";
             }
 
             // Extract port from docker-compose if possible
@@ -252,10 +271,10 @@ export class DockerInitCommand extends CommandRunner {
       }
 
       // Reconfigure - remove existing files
-      if (existsSync("docker-compose.yml")) {
+      if (existsSync("docker/docker-compose.yml")) {
         try {
           const { unlinkSync } = await import("fs");
-          unlinkSync("docker-compose.yml");
+          unlinkSync("docker/docker-compose.yml");
         } catch {
           // Ignore errors
         }
@@ -323,7 +342,7 @@ export class DockerInitCommand extends CommandRunner {
       return;
     }
 
-    // Generate docker-compose.yml and .env.docker
+    // Generate docker/docker-compose.yml and docker/.env.docker
     // This will now assign ports
     await this.generateDockerFiles(agents);
 
@@ -336,8 +355,8 @@ export class DockerInitCommand extends CommandRunner {
     } catch (error) {
       console.log(chalk.yellow("\n⚠️  Docker build failed, but configuration files are ready."));
       console.log(chalk.gray("\nYou can manually build and start containers:\n"));
-      console.log(chalk.cyan("  docker build -t clawbr-cli:latest ."));
-      console.log(chalk.cyan("  docker-compose --env-file .env.docker up -d\n"));
+      console.log(chalk.cyan("  docker build -f docker/Dockerfile -t clawbr-cli:latest ."));
+      console.log(chalk.cyan("  docker-compose -f docker/docker-compose.yml up -d\n"));
 
       const { continueAnyway } = await inquirer.prompt([
         {
@@ -497,9 +516,9 @@ export class DockerInitCommand extends CommandRunner {
 
       // Remove docker-compose.yml and .env.docker (cross-platform)
       const { unlinkSync } = await import("fs");
-      if (existsSync("docker-compose.yml")) {
+      if (existsSync("docker/docker-compose.yml")) {
         try {
-          unlinkSync("docker-compose.yml");
+          unlinkSync("docker/docker-compose.yml");
         } catch {
           // Ignore errors
         }
@@ -679,9 +698,9 @@ export class DockerInitCommand extends CommandRunner {
         }
       }
 
-      // Generate docker-compose.yml
+      // Generate docker/docker-compose.yml
       const dockerCompose = this.generateDockerCompose(agents);
-      await writeFile("docker-compose.yml", dockerCompose, "utf-8");
+      await writeFile("docker/docker-compose.yml", dockerCompose, "utf-8");
 
       // Generate .env.docker
       const envDocker = this.generateEnvDocker(agents);
@@ -702,7 +721,9 @@ export class DockerInitCommand extends CommandRunner {
         const openclawPort = agent.port || 18790 + index; // Start from 18790 to avoid 18789
 
         return `  ${serviceName}:
-    build: .
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
     container_name: clawbr-${serviceName}
     ports:
       - "${openclawPort}:${openclawPort}"
@@ -716,9 +737,9 @@ export class DockerInitCommand extends CommandRunner {
       - CLAWBR_TOKEN=${agent.token || ""}
       
       # AI Provider Keys
-      - OPENROUTER_API_KEY=${agent.provider === "openrouter" ? agent.apiKey : ""}
-      - GEMINI_API_KEY=${agent.provider === "google" ? agent.apiKey : ""}
-      - OPENAI_API_KEY=${agent.provider === "openai" ? agent.apiKey : ""}
+      - OPENROUTER_API_KEY=\${${envPrefix}_OPENROUTER_KEY}
+      - GEMINI_API_KEY=\${${envPrefix}_GEMINI_KEY}
+      - OPENAI_API_KEY=\${${envPrefix}_OPENAI_KEY}
       
       # Agent Identity
       - AGENT_NAME=${agent.name}
@@ -727,18 +748,18 @@ export class DockerInitCommand extends CommandRunner {
       # ПОЛНОЕ ОТКЛЮЧЕНИЕ АВТОРИЗАЦИИ И ПЕЙРИНГА
       - OPENCLAW_GATEWAY_AUTH=none
       - OPENCLAW_AUTH_MODE=none
-      - OPENCLAW_GATEWAY_TOKEN=insecure
+      - OPENCLAW_GATEWAY_TOKEN=${v4()}
       - OPENCLAW_CONTROL_UI_ALLOW_INSECURE_AUTH=true
       - OPENCLAW_CONTROL_UI_DANGEROUSLY_DISABLE_DEVICE_AUTH=true
       - OPENCLAW_CONTROL_UI_DANGEROUSLY_DISABLE_PAIRING=true
       - OPENCLAW_DISABLE_DEVICE_PAIRING=true
       - OPENCLAW_AUTO_APPROVE_DEVICES=true
       
-      # Отключение сетевых discovery сервисов
+      # Disable network discovery services
       - OPENCLAW_MDNS_DISABLE=true
       - OPENCLAW_BONJOUR_DISABLE=true
       
-      # Dev mode для максимального упрощения
+      # Dev mode for maximum simplicity
       - DEV_MODE=true
       - NODE_ENV=development
     volumes:
@@ -758,7 +779,7 @@ ${services}
     const lines = [
       "# Clawbr Docker Multi-Agent Configuration",
       "# Generated by clawbr docker:init",
-      "# Авторизация OpenClaw отключена для упрощения",
+      "# OpenClaw Authorization disabled for simplicity",
       "",
       "CLAWBR_API_URL=https://clawbr.com",
       "",
@@ -785,7 +806,7 @@ ${services}
     console.log(chalk.cyan("\n🏗️  Building Docker image..."));
 
     try {
-      execSync("docker build -t clawbr-cli:latest .", {
+      execSync("docker build -f docker/Dockerfile -t clawbr-cli:latest .", {
         stdio: "inherit",
       });
       console.log(chalk.green("\n✔ Docker image built"));
@@ -826,7 +847,7 @@ ${services}
         });
       }
 
-      execSync("docker-compose --env-file .env.docker up -d", {
+      execSync("docker-compose -f docker/docker-compose.yml up -d", {
         stdio: "ignore",
         env: env,
       });
@@ -841,108 +862,91 @@ ${services}
     console.log(chalk.bold.cyan("\n🚀 Configuring agents...\n"));
 
     const baseUrl = process.env.CLAWBR_API_URL || "https://clawbr.com";
+    const mdfilesDir = join(process.cwd(), "mdfiles");
 
     for (const agent of agents) {
       const serviceName = `agent-${agent.name.toLowerCase()}`;
       const spinner = ora(`Configuring ${agent.name} (@${agent.username})...`).start();
 
       try {
-        // Wait a bit for container to be ready
-        await new Promise((resolve) => setTimeout(resolve, 2000));
+        // Paths on HOST (docker/data/... is mounted to container)
+        // Note: docker-compose is in docker/, volumes are ./data/... -> so it maps to project_root/docker/data
+        const agentConfigDir = join(process.cwd(), "docker", "data", serviceName, "config");
 
-        // Get container ID for root operations
-        let containerName = "";
-        try {
-          containerName = execSync(`docker-compose ps -q ${serviceName}`, {
-            encoding: "utf-8",
-          }).trim();
-          if (containerName) {
-            // FORCE FIX PERMISSIONS: Docker creates named volumes as root, preventing 'node' user from writing
-            // We must run as root inside container to fix ownership of the mounted .openclaw directory
-            execSync(
-              `docker exec -u root ${containerName} chown -R node:node /home/node/.openclaw`,
-              { stdio: "ignore" }
-            );
-            execSync(`docker exec -u root ${containerName} chown -R node:node /home/node/.config`, {
-              stdio: "ignore",
-            });
-          }
-        } catch (e) {
-          // Ignore
-        }
+        // Ensure directory exists
+        await mkdir(agentConfigDir, { recursive: true });
 
-        // Install skill files inside container
-        try {
-          execSync(
-            `docker-compose exec -T ${serviceName} sh -c 'mkdir -p /home/node/.openclaw/skills/clawbr && cp -r /clawbr/mdfiles/* /home/node/.openclaw/skills/clawbr/ && chown -R node:node /home/node/.openclaw/skills/clawbr 2>/dev/null || true'`,
-            { stdio: "ignore" }
-          );
-        } catch {
-          // Ignore if fails
-        }
-
-        // Prepare credentials for the container if needed
+        // 1. Generate credentials.json
         if (agent.token) {
-          const credentialsJson = JSON.stringify(
-            {
-              url: baseUrl,
-              apiKey: agent.token,
-              agentName: agent.username,
-              aiProvider: agent.provider,
-              [`${agent.provider}ApiKey`]: agent.apiKey,
+          const credentials = {
+            token: agent.token,
+            apiKey: agent.token, // Required for getClawbrConfig compatibility
+            username: agent.username || agent.name,
+            agentName: agent.username || agent.name,
+            url: baseUrl,
+            aiProvider: agent.provider,
+            apiKeys: {
+              [agent.provider]: agent.apiKey,
             },
-            null,
-            2
+          };
+          await writeFile(
+            join(agentConfigDir, "credentials.json"),
+            JSON.stringify(credentials, null, 2),
+            "utf-8"
           );
+        }
 
-          // Write credentials using a temporary file on host and docker cp
-          const tmpFile = join(process.cwd(), `tmp_creds_${agent.name}.json`);
-          await writeFile(tmpFile, credentialsJson, "utf-8");
-
-          try {
-            // Get container name
-            if (!containerName) {
-              containerName = execSync(`docker-compose ps -q ${serviceName}`, {
-                encoding: "utf-8",
-              }).trim();
-            }
-
-            if (containerName) {
-              // Ensure directory exists
-              execSync(`docker exec ${containerName} mkdir -p /home/node/.config/clawbr`, {
-                stdio: "ignore",
-              });
-
-              // Copy file
-              execSync(
-                `docker cp "${tmpFile}" ${containerName}:/home/node/.config/clawbr/credentials.json`,
-                { stdio: "ignore" }
-              );
-
-              // Fix permissions (must run as root)
-              execSync(
-                `docker exec -u root ${containerName} chown -R node:node /home/node/.config`,
-                {
-                  stdio: "ignore",
-                }
-              );
-            }
-          } catch (err) {
-            // Log warning but don't fail, token is already in env
-            console.log(chalk.gray(`\nCould not copy credentials.json: ${(err as Error).message}`));
-          } finally {
-            // Clean up tmp file
-            try {
-              const { unlink } = await import("fs/promises");
-              await unlink(tmpFile);
-            } catch {}
+        // 2. Copy documentation files (SKILL.md, HEARTBEAT.md, references)
+        // Using shell commands for recursive copy is safer/easier than recursive fs calls
+        try {
+          if (existsSync(join(mdfilesDir, "SKILL.md"))) {
+            execSync(`cp "${join(mdfilesDir, "SKILL.md")}" "${agentConfigDir}/"`);
           }
+          if (existsSync(join(mdfilesDir, "HEARTBEAT.md"))) {
+            execSync(`cp "${join(mdfilesDir, "HEARTBEAT.md")}" "${agentConfigDir}/"`);
+          }
+          if (existsSync(join(mdfilesDir, "references"))) {
+            execSync(`cp -r "${join(mdfilesDir, "references")}" "${agentConfigDir}/"`);
+          }
+        } catch (copyError) {
+          // Ignore copy errors, not critical
+        }
+
+        // 3. Inject into OpenClaw (agent.md & HEARTBEAT.md)
+        try {
+          // Mounted at ./data/${serviceName}/workspace
+          const agentWorkspaceDir = join(process.cwd(), "docker", "data", serviceName, "workspace");
+
+          // Ensure workspace dir exists (it should be created by docker, but just in case)
+          await mkdir(agentWorkspaceDir, { recursive: true });
+
+          const agentMdPath = join(agentWorkspaceDir, "agent.md");
+          if (existsSync(agentMdPath)) {
+            let content = await readFile(agentMdPath, "utf-8");
+            if (!content.includes("## Clawbr")) {
+              content +=
+                "\n\n## Clawbr\n\nIf you need to do anything with Clawbr, check out '~/.config/clawbr/SKILL.md' and follow through with the instructions there.\n";
+              await writeFile(agentMdPath, content, "utf-8");
+            }
+          }
+
+          const heartbeatPath = join(agentWorkspaceDir, "HEARTBEAT.md");
+          if (existsSync(heartbeatPath)) {
+            let content = await readFile(heartbeatPath, "utf-8");
+            if (!content.includes("~/.config/clawbr/HEARTBEAT.md")) {
+              const redirectLine =
+                "Check `~/.config/clawbr/HEARTBEAT.md` for strictly follow the steps automatically";
+              await writeFile(heartbeatPath, redirectLine + "\n\n" + content, "utf-8");
+            }
+          }
+        } catch (injectError) {
+          // Ignore injection errors
         }
 
         spinner.succeed(chalk.green(`${agent.name} configured!`));
-      } catch (error) {
-        spinner.fail(chalk.red(`Failed to configure ${agent.name}`));
-        console.log(chalk.yellow(`  Error: ${(error as Error).message}`));
+      } catch (error: any) {
+        spinner.fail(chalk.red(`Failed to configure ${agent.name}: ${error.message}`));
+        // Don't throw, try next agent
       }
     }
   }
