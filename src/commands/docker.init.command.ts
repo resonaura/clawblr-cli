@@ -3,8 +3,9 @@ import inquirer from "inquirer";
 import chalk from "chalk";
 import ora from "ora";
 import { homedir } from "os";
-import { join } from "path";
-import { writeFile, readFile, mkdir, unlink } from "fs/promises";
+import { join, dirname } from "path";
+import { writeFile, readFile, mkdir, unlink, cp } from "fs/promises";
+import { fileURLToPath } from "url";
 import { existsSync } from "fs";
 import { execSync, exec } from "child_process";
 import { promisify } from "util";
@@ -20,7 +21,8 @@ interface AgentConfig {
   provider: string;
   apiKey: string;
   port?: number;
-  token?: string;
+  token?: string; // Clawbr token
+  gatewayToken?: string; // OpenClaw gateway token
 }
 
 @Command({
@@ -34,6 +36,9 @@ export class DockerInitCommand extends CommandRunner {
     console.log(
       chalk.gray("Perfect isolation for running multiple AI agents without context bleeding\n")
     );
+
+    // Ensure Docker files exist locally (for npx usage)
+    await this.scaffoldDockerFiles();
 
     // Check Docker installation
     if (!this.checkDocker()) {
@@ -261,6 +266,7 @@ export class DockerInitCommand extends CommandRunner {
 
         try {
           await this.startContainers(agents);
+          await this.waitForOpenClawReady(agents);
         } catch (error) {
           return; // Error already logged
         }
@@ -385,6 +391,7 @@ export class DockerInitCommand extends CommandRunner {
     // Start containers
     try {
       await this.startContainers(agents);
+      await this.waitForOpenClawReady(agents);
     } catch (error) {
       console.log(chalk.red("\n❌ Failed to start containers"));
       console.log(chalk.yellow("\nTry starting manually:\n"));
@@ -692,6 +699,9 @@ export class DockerInitCommand extends CommandRunner {
       // Assign ports if not already assigned
       let nextPort = 18790;
       for (const agent of agents) {
+        if (!agent.gatewayToken) {
+          agent.gatewayToken = v4();
+        }
         if (!agent.port) {
           agent.port = await this.findAvailablePort(nextPort);
           nextPort = agent.port + 1;
@@ -728,7 +738,7 @@ export class DockerInitCommand extends CommandRunner {
     ports:
       - "${openclawPort}:${openclawPort}"
     environment:
-      # Network binding - доступ с хоста
+      # Network binding - host access
       - OPENCLAW_GATEWAY_BIND=0.0.0.0
       - OPENCLAW_GATEWAY_PORT=${openclawPort}
       
@@ -745,10 +755,10 @@ export class DockerInitCommand extends CommandRunner {
       - AGENT_NAME=${agent.name}
       - OPENCLAW_GATEWAY_NAME=${agent.name.toLowerCase()}
       
-      # ПОЛНОЕ ОТКЛЮЧЕНИЕ АВТОРИЗАЦИИ И ПЕЙРИНГА
+      # FULL DISABLE OF AUTH AND PAIRING
       - OPENCLAW_GATEWAY_AUTH=none
       - OPENCLAW_AUTH_MODE=none
-      - OPENCLAW_GATEWAY_TOKEN=${v4()}
+      - OPENCLAW_GATEWAY_TOKEN=${agent.gatewayToken}
       - OPENCLAW_CONTROL_UI_ALLOW_INSECURE_AUTH=true
       - OPENCLAW_CONTROL_UI_DANGEROUSLY_DISABLE_DEVICE_AUTH=true
       - OPENCLAW_CONTROL_UI_DANGEROUSLY_DISABLE_PAIRING=true
@@ -858,6 +868,50 @@ ${services}
     }
   }
 
+  private async waitForOpenClawReady(agents: AgentConfig[]): Promise<void> {
+    const spinner = ora(
+      "Waiting for OpenClaw to start... (this may take up to 10 minutes)"
+    ).start();
+    const startTime = Date.now();
+    const timeout = 10 * 60 * 1000; // 10 minutes
+
+    const readyContainers = new Set<string>();
+
+    while (Date.now() - startTime < timeout) {
+      if (readyContainers.size === agents.length) {
+        spinner.succeed("All OpenClaw agents are ready!");
+        return;
+      }
+
+      await new Promise((r) => setTimeout(r, 2000)); // Check every 2s
+
+      for (const agent of agents) {
+        const serviceName = `agent-${agent.name.toLowerCase()}`;
+        if (readyContainers.has(serviceName)) continue;
+
+        try {
+          // Use docker logs to check for gateway startup
+          const logs = execSync(`docker logs clawbr-${serviceName} --tail 50 2>&1`).toString();
+          if (logs.includes("[gateway]") && logs.includes("listening on")) {
+            readyContainers.add(serviceName);
+            spinner.text = `Waiting for OpenClaw to start... (${readyContainers.size}/${agents.length} ready)`;
+          }
+        } catch (e) {
+          // Container might not be running yet or exec failed
+        }
+      }
+    }
+
+    spinner.fail("Timed out waiting for OpenClaw to start.");
+    console.log(
+      chalk.red(
+        "\nPossible issues:\n- Docker resource limit\n- Port conflict\n- Configuration error\n"
+      )
+    );
+    console.log(chalk.yellow("Check logs: npm run docker:logs\n"));
+    process.exit(1);
+  }
+
   private async configureContainers(agents: AgentConfig[]): Promise<void> {
     console.log(chalk.bold.cyan("\n🚀 Configuring agents...\n"));
 
@@ -962,7 +1016,10 @@ ${services}
       console.log(chalk.gray(`     Container: ${serviceName}`));
       console.log(chalk.gray(`     Provider: ${agent.provider}`));
       console.log(chalk.bold.magenta(`     🌐 Dashboard: http://localhost:${openclawPort}`));
-      console.log(chalk.bold.green(`     ✓ Авторизация отключена - просто открой браузер!\n`));
+      if (agent.gatewayToken) {
+        console.log(chalk.gray(`     🔑 Gateway Token: ${agent.gatewayToken}`));
+      }
+      console.log(chalk.bold.green(`     ✓ Authorization disabled - just open the dashboard!\n`));
     });
 
     console.log(chalk.bold.yellow("⚠️  OpenClaw Setup Required:\n"));
@@ -1056,6 +1113,49 @@ ${services}
     if (regenerationNeeded) {
       console.log(chalk.cyan("🔄 Regenerating configuration with new ports..."));
       await this.generateDockerFiles(agents);
+    }
+  }
+
+  private async scaffoldDockerFiles(): Promise<void> {
+    const __filename = fileURLToPath(import.meta.url);
+    const __dirname = dirname(__filename);
+
+    const potentialPaths = [
+      join(__dirname, "..", "..", "docker"),
+      join(__dirname, "..", "..", "..", "docker"),
+    ];
+
+    let sourceDir = "";
+    for (const p of potentialPaths) {
+      if (existsSync(join(p, "Dockerfile"))) {
+        sourceDir = p;
+        break;
+      }
+    }
+
+    if (!sourceDir) {
+      return;
+    }
+
+    const targetDir = join(process.cwd(), "docker");
+
+    // Avoid copying if source is same as target (dev mode)
+    if (sourceDir === targetDir) {
+      return;
+    }
+
+    await mkdir(targetDir, { recursive: true });
+
+    try {
+      // Clean copy of scripts and Dockerfile to ensure latest version
+      await cp(join(sourceDir, "Dockerfile"), join(targetDir, "Dockerfile"));
+
+      const sourceScripts = join(sourceDir, "scripts");
+      if (existsSync(sourceScripts)) {
+        await cp(sourceScripts, join(targetDir, "scripts"), { recursive: true, force: true });
+      }
+    } catch (e) {
+      // Ignore copy errors
     }
   }
 }

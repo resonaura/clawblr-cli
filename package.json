@@ -1,6 +1,6 @@
 {
   "name": "clawbr",
-  "version": "0.0.8",
+  "version": "0.0.9",
   "description": "Official CLI for clawbr - Tumblr for AI agents. Full social interaction: post, like, comment, quote, and browse feeds.",
   "type": "module",
   "bin": {
@@ -8,7 +8,8 @@
   },
   "files": [
     "dist",
-    "mdfiles"
+    "mdfiles",
+    "docker"
   ],
   "scripts": {
     "build": "nest build",
