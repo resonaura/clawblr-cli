@@ -114,19 +114,35 @@ export class DockerInitCommand extends CommandRunner {
           // Check if we need to fix "lan"/"ln" to "0.0.0.0" OR if missing completely
           // Check if we need to fix "0.0.0.0" or "lan" back to "ln" for host mode
           // Fix BIND to lan (which maps to 0.0.0.0 internally but passes validation)
-          if (composeContent.includes("OPENCLAW_GATEWAY_BIND=0.0.0.0")) {
-            console.log(chalk.yellow("  ↺ Fixing bind: OPENCLAW_GATEWAY_BIND=0.0.0.0 -> lan..."));
+          if (composeContent.includes("OPENCLAW_GATEWAY_BIND=lan")) {
+            console.log(chalk.yellow("  ↺ Fixing bind: OPENCLAW_GATEWAY_BIND=lan -> custom..."));
+            composeContent = composeContent.replace(
+              /OPENCLAW_GATEWAY_BIND=lan/g,
+              "OPENCLAW_GATEWAY_BIND=custom"
+            );
+            // Add custom host vars if missing
+            if (!composeContent.includes("OPENCLAW_GATEWAY_HOST=")) {
+              composeContent = composeContent.replace(
+                "OPENCLAW_GATEWAY_BIND=custom",
+                "OPENCLAW_GATEWAY_BIND=custom\n      - OPENCLAW_GATEWAY_IP=0.0.0.0\n      - OPENCLAW_GATEWAY_HOST=0.0.0.0"
+              );
+            }
+            modified = true;
+          } else if (composeContent.includes("OPENCLAW_GATEWAY_BIND=0.0.0.0")) {
+            console.log(
+              chalk.yellow("  ↺ Fixing bind: OPENCLAW_GATEWAY_BIND=0.0.0.0 -> custom...")
+            );
             composeContent = composeContent.replace(
               /OPENCLAW_GATEWAY_BIND=0.0.0.0/g,
-              "OPENCLAW_GATEWAY_BIND=lan"
+              "OPENCLAW_GATEWAY_BIND=custom"
             );
-            modified = true;
-          } else if (composeContent.includes("OPENCLAW_GATEWAY_BIND=ln")) {
-            console.log(chalk.yellow("  ↺ Fixing bind: OPENCLAW_GATEWAY_BIND=ln -> lan..."));
-            composeContent = composeContent.replace(
-              /OPENCLAW_GATEWAY_BIND=ln/g,
-              "OPENCLAW_GATEWAY_BIND=lan"
-            );
+            // Add custom host vars if missing
+            if (!composeContent.includes("OPENCLAW_GATEWAY_HOST=")) {
+              composeContent = composeContent.replace(
+                "OPENCLAW_GATEWAY_BIND=custom",
+                "OPENCLAW_GATEWAY_BIND=custom\n      - OPENCLAW_GATEWAY_IP=0.0.0.0\n      - OPENCLAW_GATEWAY_HOST=0.0.0.0"
+              );
+            }
             modified = true;
           }
 
@@ -203,6 +219,9 @@ export class DockerInitCommand extends CommandRunner {
               agent.port = parseInt(portMatch[1], 10);
             } else if (envPortMatch && envPortMatch[1]) {
               agent.port = parseInt(envPortMatch[1], 10);
+            } else {
+              // Fallback assignment if parsing failed
+              agent.port = 18790 + agents.indexOf(agent);
             }
           });
 
@@ -296,6 +315,12 @@ export class DockerInitCommand extends CommandRunner {
     console.log(chalk.gray(`Total agents: ${agents.length}\n`));
     agents.forEach((agent, idx) => {
       console.log(chalk.cyan(`  ${idx + 1}. ${agent.name} (@${agent.username})`));
+      const openclawPort = agent.port || 18790 + idx;
+      console.log(
+        chalk.gray(
+          `     Dashboard: http://localhost:${openclawPort}?token=${agent.gatewayToken || ""}`
+        )
+      );
       console.log(chalk.gray(`     Provider: ${agent.provider}\n`));
     });
 
@@ -662,7 +687,7 @@ export class DockerInitCommand extends CommandRunner {
 
     try {
       // Assign ports if not already assigned
-      let nextPort = 18789;
+      let nextPort = 18790;
       for (const agent of agents) {
         if (!agent.port) {
           agent.port = await this.findAvailablePort(nextPort);
@@ -698,7 +723,9 @@ export class DockerInitCommand extends CommandRunner {
     ports:
       - "${openclawPort}:${openclawPort}"
     environment:
-      - OPENCLAW_GATEWAY_BIND=lan
+      - OPENCLAW_GATEWAY_BIND=custom
+      - OPENCLAW_GATEWAY_IP=0.0.0.0
+      - OPENCLAW_GATEWAY_HOST=0.0.0.0
       - OPENCLAW_GATEWAY_PORT=${openclawPort}
       - CLAWBR_API_URL=\${CLAWBR_API_URL:-https://clawbr.com}
       - CLAWBR_TOKEN=\${${envPrefix}_TOKEN}
@@ -707,6 +734,9 @@ export class DockerInitCommand extends CommandRunner {
       - OPENAI_API_KEY=\${${envPrefix}_OPENAI_KEY}
       - AGENT_NAME=${agent.name}
       - OPENCLAW_GATEWAY_TOKEN=\${${envPrefix}_OPENCLAW_TOKEN}
+      - DEV_MODE=true
+      - OPENCLAW_DISABLE_AUTH=true
+      - OPENCLAW_CONTROL_UI_DANGEROUSLY_DISABLE_DEVICE_AUTH=true
     volumes:
       - ./data/${serviceName}/config:/home/node/.config/clawbr
       - ./data/${serviceName}/workspace:/workspace
@@ -732,9 +762,11 @@ ${services}
 
     agents.forEach((agent, idx) => {
       const envPrefix = agent.name.toUpperCase();
-      const openclawPort = agent.port || 18789 + idx;
+      const openclawPort = agent.port || 18790 + idx;
       lines.push(`# Agent ${idx + 1}: ${agent.name} (@${agent.username})`);
-      lines.push(`# OpenClaw Dashboard: http://localhost:${openclawPort}`);
+      lines.push(
+        `# OpenClaw Dashboard: http://localhost:${openclawPort}?token=${agent.gatewayToken || ""}`
+      );
       lines.push(`${envPrefix}_TOKEN=${agent.token || ""}`);
       lines.push(`${envPrefix}_OPENCLAW_TOKEN=${agent.gatewayToken || ""}`);
       lines.push(
@@ -920,7 +952,7 @@ ${services}
     console.log(chalk.bold("Your agents:\n"));
     agents.forEach((agent, idx) => {
       const serviceName = `agent-${agent.name.toLowerCase()}`;
-      const openclawPort = agent.port || 18789 + idx;
+      const openclawPort = agent.port || 18790 + idx;
       console.log(chalk.cyan(`  ${idx + 1}. ${agent.name} (@${agent.username})`));
       console.log(chalk.gray(`     Container: ${serviceName}`));
       console.log(chalk.gray(`     Provider: ${agent.provider}`));
@@ -933,7 +965,7 @@ ${services}
     console.log(chalk.gray("  Each agent needs OpenClaw onboarding. For each agent, run:\n"));
     agents.forEach((agent, idx) => {
       const serviceName = `agent-${agent.name.toLowerCase()}`;
-      const openclawPort = agent.port || 18789 + idx;
+      const openclawPort = agent.port || 18790 + idx;
       console.log(chalk.cyan(`  # ${agent.name}:`));
       console.log(
         chalk.white(`  docker-compose exec ${serviceName} node /openclaw/dist/index.js onboard`)

@@ -65,4 +65,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD clawbr --version && node /app/dist/index.js health || exit 1
 
 # Start OpenClaw gateway by default
-CMD ["node", "/app/dist/index.js", "gateway", "--allow-unconfigured", "--bind", "lan"]
+CMD ["node", "/app/dist/index.js", "gateway", "--allow-unconfigured", "--bind", "custom"]
