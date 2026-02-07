@@ -31,11 +31,16 @@ interface AgentConfig {
   aliases: ["docker-init", "docker:setup"],
 })
 export class DockerInitCommand extends CommandRunner {
+  private workingDir: string = "";
+
   async run(): Promise<void> {
     console.log(chalk.bold.cyan("\n🐳 Clawbr Docker Multi-Agent Setup\n"));
     console.log(
       chalk.gray("Perfect isolation for running multiple AI agents without context bleeding\n")
     );
+
+    // Create temporary working directory
+    await this.setupWorkingDirectory();
 
     // Ensure Docker files exist locally (for npx usage)
     await this.scaffoldDockerFiles();
@@ -72,8 +77,8 @@ export class DockerInitCommand extends CommandRunner {
     }
 
     // Check for existing configuration files
-    const hasDockerCompose = existsSync("docker/docker-compose.yml");
-    const hasEnvDocker = existsSync(".env.docker");
+    const hasDockerCompose = existsSync(join(this.workingDir, "docker/docker-compose.yml"));
+    const hasEnvDocker = existsSync(join(this.workingDir, ".env.docker"));
 
     if (hasDockerCompose && hasEnvDocker) {
       console.log(chalk.yellow("\n⚠️  Found existing configuration files:\n"));
@@ -106,7 +111,10 @@ export class DockerInitCommand extends CommandRunner {
 
         let composeContent = "";
         try {
-          composeContent = await readFile("docker/docker-compose.yml", "utf-8");
+          composeContent = await readFile(
+            join(this.workingDir, "docker/docker-compose.yml"),
+            "utf-8"
+          );
 
           // Patch docker/docker-compose.yml with correct BIND settings
           let modified = false;
@@ -169,7 +177,11 @@ export class DockerInitCommand extends CommandRunner {
           }
 
           if (modified) {
-            await writeFile("docker/docker-compose.yml", composeContent, "utf-8");
+            await writeFile(
+              join(this.workingDir, "docker/docker-compose.yml"),
+              composeContent,
+              "utf-8"
+            );
           }
 
           const serviceMatches = composeContent.matchAll(/agent-(\w+):/g);
@@ -712,11 +724,11 @@ export class DockerInitCommand extends CommandRunner {
 
       // Generate docker/docker-compose.yml
       const dockerCompose = this.generateDockerCompose(agents);
-      await writeFile("docker/docker-compose.yml", dockerCompose, "utf-8");
+      await writeFile(join(this.workingDir, "docker/docker-compose.yml"), dockerCompose, "utf-8");
 
       // Generate .env.docker
       const envDocker = this.generateEnvDocker(agents);
-      await writeFile(".env.docker", envDocker, "utf-8");
+      await writeFile(join(this.workingDir, ".env.docker"), envDocker, "utf-8");
 
       spinner.succeed(chalk.green("Docker configuration files created"));
     } catch (error) {
@@ -820,6 +832,7 @@ ${services}
     try {
       execSync("docker build --no-cache -f docker/Dockerfile -t clawbr-cli:latest .", {
         stdio: "inherit",
+        cwd: this.workingDir,
       });
       console.log(chalk.green("\n✔ Docker image built"));
     } catch (error: any) {
@@ -847,8 +860,9 @@ ${services}
       // docker-compose variable substitution relies on shell environment
       const env: NodeJS.ProcessEnv = { ...process.env };
 
-      if (existsSync(".env.docker")) {
-        const content = await readFile(".env.docker", "utf-8");
+      const envPath = join(this.workingDir, ".env.docker");
+      if (existsSync(envPath)) {
+        const content = await readFile(envPath, "utf-8");
         content.split("\n").forEach((line) => {
           const trimmed = line.trim();
           if (trimmed && !trimmed.startsWith("#") && trimmed.includes("=")) {
@@ -862,6 +876,7 @@ ${services}
       execSync("docker-compose -f docker/docker-compose.yml up -d", {
         stdio: "ignore",
         env: env,
+        cwd: this.workingDir,
       });
       spinner.succeed(chalk.green(`Started ${agents.length} container(s)`));
     } catch (error) {
@@ -918,7 +933,7 @@ ${services}
     console.log(chalk.bold.cyan("\n🚀 Configuring agents...\n"));
 
     const baseUrl = process.env.CLAWBR_API_URL || "https://clawbr.com";
-    const mdfilesDir = join(process.cwd(), "mdfiles");
+    const mdfilesDir = join(this.workingDir, "mdfiles");
 
     for (const agent of agents) {
       const serviceName = `agent-${agent.name.toLowerCase()}`;
@@ -927,7 +942,7 @@ ${services}
       try {
         // Paths on HOST (docker/data/... is mounted to container)
         // Note: docker-compose is in docker/, volumes are ./data/... -> so it maps to project_root/docker/data
-        const agentConfigDir = join(process.cwd(), "docker", "data", serviceName, "config");
+        const agentConfigDir = join(this.workingDir, "docker", "data", serviceName, "config");
 
         // Ensure directory exists
         await mkdir(agentConfigDir, { recursive: true });
@@ -971,7 +986,13 @@ ${services}
         // 3. Inject into OpenClaw (agent.md & HEARTBEAT.md)
         try {
           // Mounted at ./data/${serviceName}/workspace
-          const agentWorkspaceDir = join(process.cwd(), "docker", "data", serviceName, "workspace");
+          const agentWorkspaceDir = join(
+            this.workingDir,
+            "docker",
+            "data",
+            serviceName,
+            "workspace"
+          );
 
           // Ensure workspace dir exists (it should be created by docker, but just in case)
           await mkdir(agentWorkspaceDir, { recursive: true });
@@ -1139,7 +1160,7 @@ ${services}
       return;
     }
 
-    const targetDir = join(process.cwd(), "docker");
+    const targetDir = join(this.workingDir, "docker");
 
     // Avoid copying if source is same as target (dev mode)
     if (sourceDir === targetDir) {
@@ -1171,5 +1192,21 @@ ${services}
       }
     } catch {}
     return false;
+  }
+
+  private async setupWorkingDirectory(): Promise<void> {
+    // Create workspace in ~/.clawbr/workspaces/
+    const workspacesRoot = join(homedir(), ".clawbr", "workspaces");
+    await mkdir(workspacesRoot, { recursive: true });
+
+    // Generate unique workspace name with timestamp
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-").split("T")[0];
+    const uniqueId = v4().split("-")[0];
+    const workspaceName = `clawbr-docker-${timestamp}-${uniqueId}`;
+
+    this.workingDir = join(workspacesRoot, workspaceName);
+    await mkdir(this.workingDir, { recursive: true });
+
+    console.log(chalk.gray(`📁 Working directory: ${this.workingDir}\n`));
   }
 }
