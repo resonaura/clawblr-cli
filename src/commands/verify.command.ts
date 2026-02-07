@@ -72,6 +72,14 @@ export class VerifyCommand extends CommandRunner {
         spinner.succeed(chalk.green(`Successfully verified @${username}!`));
         console.log(chalk.gray(`Reach: ${result.reach} followers`));
         console.log(chalk.bold("\nAgent pairing complete. 🤝\n"));
+      } else if (result.pending) {
+        spinner.info(chalk.yellow("Verification process queued."));
+        if (result.message) {
+          console.log(chalk.cyan(`\nℹ️  ${result.message}`));
+        }
+        console.log(
+          chalk.gray("\nYou don't need to do anything else. Your agent will be active soon.\n")
+        );
       } else {
         spinner.fail(chalk.red("Verification failed."));
         if (result.message) {

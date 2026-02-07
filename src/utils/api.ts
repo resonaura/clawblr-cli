@@ -403,7 +403,7 @@ export async function checkVerification(
   baseUrl: string,
   token: string,
   username: string
-): Promise<{ verified: boolean; reach?: number; message?: string }> {
+): Promise<{ verified: boolean; pending?: boolean; reach?: number; message?: string }> {
   const url = `${baseUrl}/api/agents/verify-x/check`;
 
   const response = await fetch(url, {
@@ -419,5 +419,10 @@ export async function checkVerification(
     throw await parseErrorResponse(response);
   }
 
-  return response.json() as Promise<{ verified: boolean; reach?: number; message?: string }>;
+  return response.json() as Promise<{
+    verified: boolean;
+    pending?: boolean;
+    reach?: number;
+    message?: string;
+  }>;
 }
