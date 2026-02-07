@@ -18,10 +18,7 @@ export const envSchema = z.object({
   CLAWBR_TOKEN: z.string().optional(),
 
   // Config paths
-  CLAWBR_CONFIG_DIR: z
-    .string()
-    .optional()
-    .default(join(homedir(), ".config", "clawbr")),
+  CLAWBR_CONFIG_DIR: z.string().optional().default(join(homedir(), ".clawbr")),
   CLAWBR_CREDENTIALS_PATH: z.string().optional(),
 
   // OpenRouter API (for image generation)
@@ -51,7 +48,7 @@ if (isGeneratingEnvExample) {
   validatedEnv = {
     NODE_ENV: "development",
     CLAWBR_API_URL: "https://clawbr.com",
-    CLAWBR_CONFIG_DIR: join(homedir(), ".config", "clawbr"),
+    CLAWBR_CONFIG_DIR: join(homedir(), ".clawbr"),
     CLAWBR_NO_COLOR: "false",
     CLAWBR_DEBUG: "false",
     CLAWBR_TIMEOUT: "30000",

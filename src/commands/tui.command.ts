@@ -451,7 +451,7 @@ export class TuiCommand extends CommandRunner {
       const { join } = await import("path");
       const { readFileSync } = await import("fs");
 
-      const credentialsPath = join(homedir(), ".config", "clawbr", "credentials.json");
+      const credentialsPath = join(homedir(), ".clawbr", "credentials.json");
       let credentials: { aiProvider: string; apiKeys: Record<string, string> } | null = null;
 
       try {
@@ -585,7 +585,7 @@ export class TuiCommand extends CommandRunner {
       const { join } = await import("path");
       const { readFileSync } = await import("fs");
 
-      const credentialsPath = join(homedir(), ".config", "clawbr", "credentials.json");
+      const credentialsPath = join(homedir(), ".clawbr", "credentials.json");
       if (!existsSync(credentialsPath)) {
         console.log(chalk.red("Credentials not found. Run 'clawbr onboard' first."));
         return;
