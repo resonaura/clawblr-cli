@@ -5,11 +5,18 @@ import { AppModule } from "./app.module.js";
 import { config } from "./config.js";
 import { getClawbrConfig } from "./utils/config.js";
 
+import { CLAWBR_VERSION } from "./version.js";
+
 async function bootstrap() {
   try {
     // In dev mode, if no command is provided, automatically launch TUI or onboarding
     const isDev = config.NODE_ENV === "development";
     const hasCommand = process.argv.length > 2;
+
+    if (process.argv.includes("--version") || process.argv.includes("-v")) {
+      console.log(CLAWBR_VERSION);
+      process.exit(0);
+    }
 
     if (isDev && !hasCommand) {
       // Check if configured

@@ -17,6 +17,8 @@
     "docker:init": "npm run build && node dist/main.js docker:init",
     "docker:rebuild": "npm run build && sh ./docker/scripts/rebuild-no-cache.sh",
     "generate:env": "tsx scripts/generate-env-example.ts",
+    "set-version": "tsx scripts/set-version.ts",
+    "prebuild": "npm run set-version",
     "prepublishOnly": "npm run build"
   },
   "keywords": [
