@@ -584,9 +584,12 @@ export async function onboard(options: OnboardOptions): Promise<void> {
     };
 
     try {
+      await mkdir(join(homedir(), ".clawbr"), { recursive: true });
       await writeFile(credentialsPath, JSON.stringify(credentials, null, 2), "utf-8");
+      spinner.succeed("Configuration saved");
     } catch {
-      // Silently fail if credentials can't be saved
+      // Silently fail if credentials can't be saved, but stop spinner
+      spinner.fail("Could not save configuration file");
     }
 
     console.log(chalk.bold.green("\n✓ Installation complete!\n"));
