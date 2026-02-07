@@ -231,7 +231,7 @@ export class DockerInitCommand extends CommandRunner {
               agent.provider = "openai";
             }
 
-            // Extract port from docker-compose if possible
+            // Extract port from docker compose if possible
             // Look for ports mapping OR env var OPENCLAW_GATEWAY_PORT
             const serviceBlock =
               composeContent.match(
@@ -376,7 +376,7 @@ export class DockerInitCommand extends CommandRunner {
       console.log(chalk.yellow("\n⚠️  Docker build failed, but configuration files are ready."));
       console.log(chalk.gray("\nYou can manually build and start containers:\n"));
       console.log(chalk.cyan("  docker build -f docker/Dockerfile -t clawbr-cli:latest ."));
-      console.log(chalk.cyan("  docker-compose -f docker/docker-compose.yml up -d\n"));
+      console.log(chalk.cyan("  docker compose -f docker/docker-compose.yml up -d\n"));
 
       const { continueAnyway } = await inquirer.prompt([
         {
@@ -409,7 +409,7 @@ export class DockerInitCommand extends CommandRunner {
     } catch (error) {
       console.log(chalk.red("\n❌ Failed to start containers"));
       console.log(chalk.yellow("\nTry starting manually:\n"));
-      console.log(chalk.cyan("  docker-compose --env-file .env.docker up -d\n"));
+      console.log(chalk.cyan("  docker compose --env-file .env.docker up -d\n"));
       return;
     }
 
@@ -426,7 +426,7 @@ export class DockerInitCommand extends CommandRunner {
     try {
       // Check if Docker is installed
       execSync("docker --version", { stdio: "ignore" });
-      execSync("docker-compose --version", { stdio: "ignore" });
+      execSync("docker compose --version", { stdio: "ignore" });
 
       spinner.text = "Checking if Docker daemon is running...";
 
@@ -516,7 +516,7 @@ export class DockerInitCommand extends CommandRunner {
     try {
       // Stop and remove containers (cross-platform)
       try {
-        execSync("docker-compose down -v", { stdio: "ignore" });
+        execSync("docker compose down -v", { stdio: "ignore" });
       } catch {
         // Ignore if docker-compose.yml doesn't exist
       }
@@ -857,7 +857,7 @@ ${services}
 
     try {
       // Manually load variables from .env.docker to ensure interpolation works
-      // docker-compose variable substitution relies on shell environment
+      // docker compose variable substitution relies on shell environment
       const env: NodeJS.ProcessEnv = { ...process.env };
 
       const envPath = join(this.workingDir, ".env.docker");
@@ -873,7 +873,7 @@ ${services}
         });
       }
 
-      execSync("docker-compose -f docker/docker-compose.yml up -d", {
+      execSync("docker compose -f docker/docker-compose.yml up -d", {
         stdio: "ignore",
         env: env,
         cwd: this.workingDir,
@@ -941,7 +941,7 @@ ${services}
 
       try {
         // Paths on HOST (docker/data/... is mounted to container)
-        // Note: docker-compose is in docker/, volumes are ./data/... -> so it maps to project_root/docker/data
+        // Note: docker compose is in docker/, volumes are ./data/... -> so it maps to project_root/docker/data
         const agentConfigDir = join(this.workingDir, "docker", "data", serviceName, "config");
 
         // Ensure directory exists
@@ -1052,7 +1052,7 @@ ${services}
       const openclawPort = agent.port || 18790 + idx;
       console.log(chalk.cyan(`  # ${agent.name}:`));
       console.log(
-        chalk.white(`  docker-compose exec ${serviceName} node /openclaw/dist/index.js onboard`)
+        chalk.white(`  docker compose exec ${serviceName} node /openclaw/dist/index.js onboard`)
       );
       console.log(chalk.gray(`  # Then visit: http://localhost:${openclawPort}\n`));
     });
@@ -1064,7 +1064,7 @@ ${services}
     console.log(chalk.gray("  Execute Clawbr commands:"));
     agents.forEach((agent) => {
       const serviceName = `agent-${agent.name.toLowerCase()}`;
-      console.log(chalk.cyan(`    docker-compose exec ${serviceName} clawbr feed`));
+      console.log(chalk.cyan(`    docker compose exec ${serviceName} clawbr feed`));
     });
 
     console.log(chalk.gray("\n  Stop all agents:"));
