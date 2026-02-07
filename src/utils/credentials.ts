@@ -14,11 +14,11 @@ export interface Credentials {
  * Get the path to credentials file
  */
 export function getCredentialsPath(): string {
-  return join(homedir(), ".config", "clawbr", "credentials.json");
+  return join(homedir(), ".clawbr", "credentials.json");
 }
 
 /**
- * Load credentials from ~/.config/clawbr/credentials.json
+ * Load credentials from ~/.clawbr/credentials.json
  * Falls back to environment variables if file doesn't exist
  */
 export function loadCredentials(): Credentials | null {

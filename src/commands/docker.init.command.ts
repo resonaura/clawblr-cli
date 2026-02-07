@@ -166,12 +166,9 @@ export class DockerInitCommand extends CommandRunner {
           }
 
           // Fix volume paths from /root to /home/node
-          if (composeContent.includes("/root/.config/clawbr")) {
+          if (composeContent.includes("/root/.clawbr")) {
             console.log(chalk.yellow("  ↺ Fix volume paths to /home/node..."));
-            composeContent = composeContent.replace(
-              /\/root\/.config\/clawbr/g,
-              "/home/node/.config/clawbr"
-            );
+            composeContent = composeContent.replace(/\/root\/.clawbr/g, "/home/node/.clawbr");
             composeContent = composeContent.replace(/\/root\/.openclaw/g, "/home/node/.openclaw");
             modified = true;
           }
@@ -787,7 +784,7 @@ export class DockerInitCommand extends CommandRunner {
       - DEV_MODE=true
       - NODE_ENV=development
     volumes:
-      - ./data/${serviceName}/config:/home/node/.config/clawbr
+      - ./data/${serviceName}/config:/home/node/.clawbr
       - ./data/${serviceName}/workspace:/workspace
     working_dir: /workspace
     restart: unless-stopped`;
@@ -933,7 +930,6 @@ ${services}
     console.log(chalk.bold.cyan("\n🚀 Configuring agents...\n"));
 
     const baseUrl = process.env.CLAWBR_API_URL || "https://clawbr.com";
-    const mdfilesDir = join(this.workingDir, "mdfiles");
 
     for (const agent of agents) {
       const serviceName = `agent-${agent.name.toLowerCase()}`;
@@ -953,7 +949,6 @@ ${services}
             token: agent.token,
             apiKey: agent.token, // Required for getClawbrConfig compatibility
             username: agent.username || agent.name,
-            agentName: agent.username || agent.name,
             url: baseUrl,
             aiProvider: agent.provider,
             apiKeys: {
@@ -967,23 +962,7 @@ ${services}
           );
         }
 
-        // 2. Copy documentation files (SKILL.md, HEARTBEAT.md, references)
-        // Using shell commands for recursive copy is safer/easier than recursive fs calls
-        try {
-          if (existsSync(join(mdfilesDir, "SKILL.md"))) {
-            execSync(`cp "${join(mdfilesDir, "SKILL.md")}" "${agentConfigDir}/"`);
-          }
-          if (existsSync(join(mdfilesDir, "HEARTBEAT.md"))) {
-            execSync(`cp "${join(mdfilesDir, "HEARTBEAT.md")}" "${agentConfigDir}/"`);
-          }
-          if (existsSync(join(mdfilesDir, "references"))) {
-            execSync(`cp -r "${join(mdfilesDir, "references")}" "${agentConfigDir}/"`);
-          }
-        } catch (copyError) {
-          // Ignore copy errors, not critical
-        }
-
-        // 3. Inject into OpenClaw (agent.md & HEARTBEAT.md)
+        // 2. Inject into OpenClaw (agent.md & HEARTBEAT.md)
         try {
           // Mounted at ./data/${serviceName}/workspace
           const agentWorkspaceDir = join(
@@ -1002,7 +981,7 @@ ${services}
             let content = await readFile(agentMdPath, "utf-8");
             if (!content.includes("## Clawbr")) {
               content +=
-                "\n\n## Clawbr\n\nIf you need to do anything with Clawbr, check out '~/.config/clawbr/SKILL.md' and follow through with the instructions there.\n";
+                "\n\n## Clawbr\n\nIf you need to do anything with Clawbr, check out '~/.clawbr/SKILL.md' and follow through with the instructions there.\n";
               await writeFile(agentMdPath, content, "utf-8");
             }
           }
@@ -1010,9 +989,9 @@ ${services}
           const heartbeatPath = join(agentWorkspaceDir, "HEARTBEAT.md");
           if (existsSync(heartbeatPath)) {
             let content = await readFile(heartbeatPath, "utf-8");
-            if (!content.includes("~/.config/clawbr/HEARTBEAT.md")) {
+            if (!content.includes("~/.clawbr/HEARTBEAT.md")) {
               const redirectLine =
-                "Check `~/.config/clawbr/HEARTBEAT.md` for strictly follow the steps automatically";
+                "Check `~/.clawbr/HEARTBEAT.md` for strictly follow the steps automatically";
               await writeFile(heartbeatPath, redirectLine + "\n\n" + content, "utf-8");
             }
           }

@@ -8,7 +8,7 @@ import { mkdir, writeFile, readFile, copyFile } from "fs/promises";
 import { existsSync } from "fs";
 import { fileURLToPath } from "url";
 
-import { updateClawbrConfig, getClawbrConfig } from "../utils/config.js";
+import { getClawbrConfig } from "../utils/config.js";
 import { registerAgent } from "../utils/api.js";
 import { Command, CommandRunner, Option } from "nest-commander";
 
@@ -105,112 +105,88 @@ const POST_OPTIONS = [
 ];
 
 /**
- * Copy markdown files from local mdfiles/ directory to OpenClaw skills directory
+ * Install skill files from clawbr.com
  * Structure:
- * - ~/.openclaw/skills/clawbr/SKILL.md
- * - ~/.openclaw/skills/clawbr/HEARTBEAT.md
+ * 1. Download to ~/.clawbr/skills/ (Cache/Source)
+ * 2. Copy to ~/.openclaw/skills/clawbr/ (Active)
  */
 async function installSkillFiles(): Promise<void> {
-  const skillsDir = join(homedir(), ".openclaw", "skills", "clawbr");
+  const openClawSkillsDir = join(homedir(), ".openclaw", "skills", "clawbr");
+  const clawbrSkillsDir = join(homedir(), ".clawbr", "skills");
+  const baseUrl = "https://clawbr.com";
 
-  // Create directory
-  await mkdir(skillsDir, { recursive: true });
+  // Create directories
+  await mkdir(openClawSkillsDir, { recursive: true });
+  await mkdir(clawbrSkillsDir, { recursive: true });
 
-  // Determine source directory (mdfiles in project root)
-  const potentialPaths = [
-    join(__dirname, "..", "..", "mdfiles"),
-    join(__dirname, "..", "..", "..", "mdfiles"),
-    "/clawbr/mdfiles",
+  const files = [
+    { name: "SKILL.md", url: `${baseUrl}/skill.md` },
+    { name: "HEARTBEAT.md", url: `${baseUrl}/heartbeat.md` },
   ];
 
-  let mdfilesDir = potentialPaths[0];
-  for (const p of potentialPaths) {
-    if (existsSync(join(p, "SKILL.md"))) {
-      mdfilesDir = p;
-      break;
-    }
-  }
+  for (const file of files) {
+    try {
+      // 1. Download to ~/.clawbr/skills/
+      const response = await fetch(file.url);
 
-  // Only copy SKILL.md and HEARTBEAT.md
-  const filesToCopy = ["SKILL.md", "HEARTBEAT.md"];
-
-  for (const fileName of filesToCopy) {
-    const sourcePath = join(mdfilesDir, fileName);
-    const destPath = join(skillsDir, fileName);
-
-    if (existsSync(sourcePath)) {
-      try {
-        await copyFile(sourcePath, destPath);
-        console.log(chalk.gray(`  ✓ Installed ${fileName}`));
-      } catch (error) {
-        console.log(chalk.yellow(`  ⚠ Could not install ${fileName}: ${(error as Error).message}`));
+      let content = "";
+      if (response.ok) {
+        content = await response.text();
+        const clawbrPath = join(clawbrSkillsDir, file.name);
+        await writeFile(clawbrPath, content, "utf-8");
+      } else {
+        // Fallback: try to read from local cache if download fails
+        const clawbrPath = join(clawbrSkillsDir, file.name);
+        if (existsSync(clawbrPath)) {
+          console.log(chalk.yellow(`  ⚠ Could not fetch ${file.name}, using cached version`));
+          content = await readFile(clawbrPath, "utf-8");
+        } else {
+          throw new Error(`Could not fetch ${file.name} locally or remotely`);
+        }
       }
-    } else {
-      console.log(chalk.yellow(`  ⚠ Source file missing: ${fileName}`));
+
+      // 2. Copy to ~/.openclaw/skills/clawbr/
+      const openClawPath = join(openClawSkillsDir, file.name);
+      await writeFile(openClawPath, content, "utf-8");
+
+      console.log(chalk.gray(`  ✓ Installed ${file.name}`));
+    } catch (error) {
+      console.log(chalk.yellow(`  ⚠ Could not install ${file.name}: ${(error as Error).message}`));
     }
   }
 }
 
 /**
- * Inject Clawbr section into OpenClaw agent.md if not already present
+ * Update agent.md to reference Clawbr instructions
  */
-async function injectIntoOpenClawAgent(): Promise<boolean> {
-  const agentMdPath = join(homedir(), ".openclaw", "workspace", "agent.md");
+async function updateAgentMd(): Promise<void> {
+  const agentMdPath = join(homedir(), ".openclaw", "agents", "main", "agent", "agent.md");
 
-  if (!existsSync(agentMdPath)) {
-    return false; // OpenClaw not installed or agent.md doesn't exist
-  }
-
-  try {
-    const content = await readFile(agentMdPath, "utf-8");
-
-    // Check if Clawbr section already exists
-    if (content.includes("## Clawbr")) {
-      return false; // Already injected
+  if (existsSync(agentMdPath)) {
+    let content = await readFile(agentMdPath, "utf-8");
+    if (!content.includes("## Clawbr")) {
+      content +=
+        "\n\n## Clawbr\n\nIf you need to do anything with Clawbr, check out '~/.clawbr/SKILL.md' and follow through with the instructions there.\n";
+      await writeFile(agentMdPath, content, "utf-8");
+      console.log(chalk.gray("  ✓ Updated agent.md instructions"));
     }
-
-    // Append Clawbr section
-    const clawbrSection = `
-
-## Clawbr
-
-If you need to do anything with Clawbr, check out '~/.config/clawbr/SKILL.md' and follow through with the instructions there.
-`;
-
-    await writeFile(agentMdPath, content + clawbrSection, "utf-8");
-    return true; // Successfully injected
-  } catch (error) {
-    console.log(chalk.gray(`  Could not inject into agent.md: ${(error as Error).message}`));
-    return false;
   }
 }
 
 /**
- * Inject redirect into OpenClaw HEARTBEAT.md if not already present
+ * Update HEARTBEAT.md to enforce strict adherence to documentation
  */
-async function injectIntoOpenClawHeartbeat(): Promise<boolean> {
-  const heartbeatPath = join(homedir(), ".openclaw", "workspace", "HEARTBEAT.md");
+async function updateHeartbeatMd(): Promise<void> {
+  const heartbeatPath = join(homedir(), ".openclaw", "agents", "main", "agent", "HEARTBEAT.md");
 
-  if (!existsSync(heartbeatPath)) {
-    return false; // OpenClaw not installed or HEARTBEAT.md doesn't exist
-  }
-
-  try {
-    const content = await readFile(heartbeatPath, "utf-8");
-    const redirectLine =
-      "Check `~/.config/clawbr/HEARTBEAT.md` for strictly follow the steps automatically";
-
-    // Check if redirect already exists
-    if (content.includes("~/.config/clawbr/HEARTBEAT.md")) {
-      return false; // Already injected
+  if (existsSync(heartbeatPath)) {
+    let content = await readFile(heartbeatPath, "utf-8");
+    if (!content.includes("~/.clawbr/HEARTBEAT.md")) {
+      const redirectLine =
+        "Check `~/.clawbr/HEARTBEAT.md` for strictly follow the steps automatically";
+      await writeFile(heartbeatPath, redirectLine + "\n\n" + content, "utf-8");
+      console.log(chalk.gray("  ✓ Updated HEARTBEAT.md instructions"));
     }
-
-    // Prepend redirect to the beginning of the file
-    await writeFile(heartbeatPath, redirectLine + "\n\n" + content, "utf-8");
-    return true; // Successfully injected
-  } catch (error) {
-    console.log(chalk.gray(`  Could not inject into HEARTBEAT.md: ${(error as Error).message}`));
-    return false;
   }
 }
 
@@ -346,30 +322,48 @@ async function detectOpenRouterKey(): Promise<string | null> {
 }
 
 export async function onboard(options: OnboardOptions): Promise<void> {
-  const baseUrl = options.url || process.env.CLAWBR_API_URL || "https://clawbr.com";
+  const baseUrl = options.url || "https://clawbr.com";
 
   // Check if already configured
   const existingConfig = await getClawbrConfig();
   if (existingConfig?.apiKey) {
-    console.log(chalk.bold.cyan("\n📸 clawbr\n"));
-    console.log(chalk.gray(`Agent: ${existingConfig.agentName}`));
-    console.log(chalk.gray(`URL: ${existingConfig.url}\n`));
-
-    // Interactive post menu only when running in a terminal
-    if (process.stdin.isTTY) {
-      await runPostFlow(existingConfig.url);
-    } else {
-      console.log(chalk.green("✓ clawbr is already configured."));
-      console.log(chalk.gray(`\nRun 'npx clawbr@latest' to start the interactive shell.`));
+    if (options.nonInteractive) {
+      console.log("Already configured. Use a new environment or clear config to start fresh.");
+      return;
     }
-    return;
+
+    // Interactive: Ask to re-onboard
+    const { reOnboard } = await inquirer.prompt([
+      {
+        type: "confirm",
+        name: "reOnboard",
+        message:
+          "Clawbr is already configured. Do you want to re-run onboarding? (This will overwrite existing credentials)",
+        default: false,
+      },
+    ]);
+
+    if (!reOnboard) {
+      console.log(chalk.bold.cyan("\n📸 clawbr\n"));
+      console.log(chalk.gray(`Agent: ${existingConfig.agentName}`));
+      console.log(chalk.gray(`URL: ${existingConfig.url}\n`));
+
+      // Interactive post menu only when running in a terminal
+      if (process.stdin.isTTY) {
+        await runPostFlow(existingConfig.url);
+      } else {
+        console.log(chalk.green("✓ clawbr is already configured."));
+        console.log(chalk.gray(`\nRun 'npx clawbr@latest' to start the interactive shell.`));
+      }
+      return;
+    }
+    // Continue to fresh onboarding...
   }
 
   // Fresh onboarding
   console.log(chalk.bold.cyan("\n📸 clawbr Onboarding\n"));
   console.log(chalk.gray("Tumblr for AI agents - Share your build moments\n"));
 
-  // Install skill files from local mdfiles/
   const skillSpinner = ora("Installing clawbr documentation files...").start();
   try {
     await installSkillFiles();
@@ -383,21 +377,9 @@ export async function onboard(options: OnboardOptions): Promise<void> {
   // Auto-inject into OpenClaw agent.md and HEARTBEAT.md if available
   const openclawSpinner = ora("Checking OpenClaw integration...").start();
   try {
-    const agentInjected = await injectIntoOpenClawAgent();
-    const heartbeatInjected = await injectIntoOpenClawHeartbeat();
-
-    if (agentInjected || heartbeatInjected) {
-      const messages = [];
-      if (agentInjected) messages.push("agent.md");
-      if (heartbeatInjected) messages.push("HEARTBEAT.md");
-      openclawSpinner.succeed(
-        chalk.green(`Auto-injected Clawbr instructions into OpenClaw ${messages.join(" and ")}`)
-      );
-    } else {
-      openclawSpinner.info(
-        chalk.gray("OpenClaw integration skipped (already configured or files not found)")
-      );
-    }
+    await updateAgentMd();
+    await updateHeartbeatMd();
+    openclawSpinner.succeed(chalk.green("Verified OpenClaw integration"));
   } catch {
     openclawSpinner.info(chalk.gray("OpenClaw integration skipped"));
   }
@@ -587,16 +569,10 @@ export async function onboard(options: OnboardOptions): Promise<void> {
     // Save configuration
     spinner.start("Saving configuration...");
 
-    await updateClawbrConfig({
-      url: baseUrl,
-      apiKey: response.token,
-      agentName: response.agent.username,
-    });
-
-    spinner.succeed(chalk.green("Configuration saved!"));
+    // (Previously updated OpenClaw config here, now removed as per user request to rely strictly on credentials.json)
 
     // Save credentials.json for generate command
-    const credentialsPath = join(homedir(), ".config", "clawbr", "credentials.json");
+    const credentialsPath = join(homedir(), ".clawbr", "credentials.json");
     const credentials = {
       token: response.token,
       username: response.agent.username,

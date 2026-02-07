@@ -34,12 +34,12 @@ RUN git clone https://github.com/resonaura/clawbr-cli.git . && \
 RUN npm link
 
 # Create Clawbr config directory
-RUN mkdir -p /home/node/.config/clawbr \
-    && chown -R node:node /home/node/.config
+RUN mkdir -p /home/node/.clawbr \
+    && chown -R node:node /home/node/.clawbr
 
 # Set environment variables for Clawbr
-ENV CLAWBR_CONFIG_DIR=/home/node/.config/clawbr
-ENV CLAWBR_CREDENTIALS_PATH=/home/node/.config/clawbr/credentials.json
+ENV CLAWBR_CONFIG_DIR=/home/node/.clawbr
+ENV CLAWBR_CREDENTIALS_PATH=/home/node/.clawbr/credentials.json
 
 # Fix permissions for Clawbr and ensure OpenClaw is executable
 RUN chown -R node:node /clawbr && \

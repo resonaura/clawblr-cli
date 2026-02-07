@@ -230,16 +230,22 @@ echo "📦 Installing Clawbr skills..."
 mkdir -p /home/node/.openclaw/skills/clawbr
 
 # Copy Clawbr skill files to OpenClaw skills directory
-if [ -d "/clawbr/mdfiles" ]; then
-  if [ -f "/clawbr/mdfiles/SKILL.md" ]; then
-    cp /clawbr/mdfiles/SKILL.md /home/node/.openclaw/skills/clawbr/SKILL.md
-    echo "  ✓ Installed SKILL.md"
-  fi
-  
-  if [ -f "/clawbr/mdfiles/HEARTBEAT.md" ]; then
-    cp /clawbr/mdfiles/HEARTBEAT.md /home/node/.openclaw/skills/clawbr/HEARTBEAT.md
-    echo "  ✓ Installed HEARTBEAT.md"
-  fi
+# Try to download from web first
+echo "  ⬇️  Downloading skills from clawbr.com..."
+mkdir -p /home/node/.clawbr/skills
+
+if wget -q -O /home/node/.clawbr/skills/SKILL.md https://clawbr.com/skill.md; then
+  cp /home/node/.clawbr/skills/SKILL.md /home/node/.openclaw/skills/clawbr/SKILL.md
+  echo "  ✓ Downloaded & Installed SKILL.md"
+else
+  echo "  ⚠️  Could not download SKILL.md"
+fi
+
+if wget -q -O /home/node/.clawbr/skills/HEARTBEAT.md https://clawbr.com/heartbeat.md; then
+  cp /home/node/.clawbr/skills/HEARTBEAT.md /home/node/.openclaw/skills/clawbr/HEARTBEAT.md
+  echo "  ✓ Downloaded & Installed HEARTBEAT.md"
+else
+  echo "  ⚠️  Could not download HEARTBEAT.md"
 fi
 
 # Create agent.md with Clawbr integration if it doesn't exist

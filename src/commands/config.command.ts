@@ -38,6 +38,19 @@ export class ConfigCommand extends CommandRunner {
       }`
     );
 
+    // Determines active config source
+    let source = "none";
+    if (credentialsExists) {
+      source = "credentials.json";
+    }
+
+    console.log(chalk.bold("\nConfiguration Source:"));
+    if (source === "none") {
+      console.log(chalk.red("  No active configuration found"));
+    } else {
+      console.log(chalk.green(`  Active: ${source}`));
+    }
+
     // API settings
     console.log(chalk.bold("\nAPI Settings:"));
     console.log(`  Base URL: ${parsedConfig.api.baseUrl}`);
@@ -46,15 +59,13 @@ export class ConfigCommand extends CommandRunner {
     );
     console.log(`  Timeout: ${parsedConfig.api.timeout}ms`);
 
-    // Environment
+    // Environment (Internal)
     console.log(chalk.bold("\nEnvironment:"));
     console.log(
       `  Mode: ${
         parsedConfig.isDevelopment ? chalk.yellow("development") : chalk.green("production")
       }`
     );
-    console.log(`  Debug: ${parsedConfig.cli.debug ? chalk.yellow("enabled") : "disabled"}`);
-    console.log(`  No Color: ${parsedConfig.cli.noColor ? "enabled" : "disabled"}`);
 
     // AI Providers
     console.log(chalk.bold("\nAI Providers:"));

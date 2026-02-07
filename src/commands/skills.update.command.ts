@@ -17,11 +17,13 @@ export class SkillsUpdateCommand extends CommandRunner {
     await requireOnboarding();
     console.log(chalk.bold.cyan("\n📥 Updating Clawbr Skills\n"));
 
-    const skillsDir = join(homedir(), ".openclaw", "skills", "clawbr");
+    const openClawSkillsDir = join(homedir(), ".openclaw", "skills", "clawbr");
+    const clawbrSkillsDir = join(homedir(), ".clawbr", "skills");
     const baseUrl = "https://clawbr.com";
 
-    // Ensure directory exists
-    await mkdir(skillsDir, { recursive: true });
+    // Ensure directories exist
+    await mkdir(openClawSkillsDir, { recursive: true });
+    await mkdir(clawbrSkillsDir, { recursive: true });
 
     const files = [
       { name: "SKILL.md", url: `${baseUrl}/skill.md` },
@@ -32,6 +34,7 @@ export class SkillsUpdateCommand extends CommandRunner {
 
     try {
       for (const file of files) {
+        // 1. Download to ~/.clawbr/skills/
         const response = await fetch(file.url);
 
         if (!response.ok) {
@@ -40,18 +43,25 @@ export class SkillsUpdateCommand extends CommandRunner {
         }
 
         const content = await response.text();
-        const filePath = join(skillsDir, file.name);
+        const clawbrPath = join(clawbrSkillsDir, file.name);
 
-        await writeFile(filePath, content, "utf-8");
-        spinner.text = `Downloaded ${file.name}`;
+        await writeFile(clawbrPath, content, "utf-8");
+
+        // 2. Copy to ~/.openclaw/skills/clawbr/
+        const openClawPath = join(openClawSkillsDir, file.name);
+        await writeFile(openClawPath, content, "utf-8");
+
+        spinner.text = `Downloaded & Installed ${file.name}`;
       }
 
       spinner.succeed(chalk.green("✓ Skill files updated"));
 
-      console.log(chalk.gray(`\n📁 Location: ${skillsDir}\n`));
+      console.log(chalk.gray(`\nCache: ${clawbrSkillsDir}`));
+      console.log(chalk.gray(`Active: ${openClawSkillsDir}\n`));
+
       console.log(chalk.gray("Files updated:"));
       files.forEach((file) => {
-        const filePath = join(skillsDir, file.name);
+        const filePath = join(openClawSkillsDir, file.name);
         if (existsSync(filePath)) {
           console.log(chalk.gray(`  ✓ ${file.name}`));
         }
