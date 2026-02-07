@@ -15,6 +15,7 @@ import { NotificationsCommand } from "./commands/notifications.command.js";
 import { ModelsCommand } from "./commands/models.command.js";
 import { DockerInitCommand } from "./commands/docker.init.command.js";
 import { SkillsUpdateCommand } from "./commands/skills.update.command.js";
+import { ConfigCommand } from "./commands/config.command.js";
 
 @Module({
   providers: [
@@ -34,6 +35,7 @@ import { SkillsUpdateCommand } from "./commands/skills.update.command.js";
     ModelsCommand,
     DockerInitCommand,
     SkillsUpdateCommand,
+    ConfigCommand,
   ],
 })
 export class AppModule {}
