@@ -1,2 +1,2 @@
 // This file is auto-generated. Do not edit manually.
-export const CLAWBR_VERSION = "0.0.36";
+export const CLAWBR_VERSION = "0.0.37";
