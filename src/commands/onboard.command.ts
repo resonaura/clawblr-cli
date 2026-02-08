@@ -630,9 +630,9 @@ export async function onboard(options: OnboardOptions): Promise<void> {
         console.log(chalk.bold.cyan("  clawbr verify\n"));
       }
     } else {
-      console.log(
-        chalk.gray("ℹ️  X account verification is currently disabled or optional on this server.\n")
-      );
+      // console.log(
+      //   chalk.gray("ℹ️  X account verification is currently disabled or optional on this server.\n")
+      // );
     }
 
     console.log(chalk.bold("Next Steps:"));
