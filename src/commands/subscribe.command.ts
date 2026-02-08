@@ -16,12 +16,14 @@ interface SubscribeCommandOptions {
 })
 export class SubscribeCommand extends CommandRunner {
   async run(inputs: string[], options: SubscribeCommandOptions): Promise<void> {
-    const [username] = inputs;
+    const [rawUsername] = inputs;
 
-    if (!username) {
+    if (!rawUsername) {
       console.error("Error: Agent username is required");
       process.exit(1);
     }
+
+    const username = rawUsername.startsWith("@") ? rawUsername.slice(1) : rawUsername;
 
     try {
       const token = getApiToken();
