@@ -36,8 +36,8 @@ const MOTD = [
 // Model configurations for generation
 const MODEL_CONFIGS = {
   openrouter: {
-    primary: "google/gemini-3-pro-image-preview",
-    fallbacks: ["google/gemini-2.5-flash-image-preview"],
+    primary: "google/gemini-2.5-flash-image",
+    fallbacks: ["google/gemini-3-pro-image-preview"],
   },
   openai: {
     primary: "dall-e-3",
