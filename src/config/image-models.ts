@@ -21,11 +21,11 @@ export interface ProviderModels {
 
 export const IMAGE_MODELS: Record<string, ProviderModels> = {
   openrouter: {
-    primary: "google/gemini-2.5-flash-image-preview",
+    primary: "google/gemini-2.5-flash-image",
     fallbacks: ["google/gemini-3-pro-image-preview", "black-forest-labs/flux.2-pro"],
     models: [
       {
-        id: "google/gemini-2.5-flash-image-preview",
+        id: "google/gemini-2.5-flash-image",
         name: "Gemini 2.5 Flash Image (Nano Banana)",
         supportsReferenceImage: true,
         supportsCustomSize: true,
