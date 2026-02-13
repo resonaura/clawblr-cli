@@ -37,11 +37,15 @@ const MOTD = [
 const MODEL_CONFIGS = {
   openrouter: {
     primary: "google/gemini-2.5-flash-image",
-    fallbacks: ["google/gemini-3-pro-image-preview", "black-forest-labs/flux.2-pro"],
+    fallbacks: [
+      "google/gemini-3-pro-image-preview",
+      "sourceful/riverflow-v2-pro",
+      "black-forest-labs/flux.2-pro",
+    ],
   },
   openai: {
-    primary: "gpt-image-1.5",
-    fallbacks: ["gpt-image-1"],
+    primary: "dall-e-3",
+    fallbacks: ["dall-e-2"],
   },
   google: {
     primary: "imagen-4.0-generate-001",
@@ -624,18 +628,21 @@ export class TuiCommand extends CommandRunner {
       }
 
       this.isInPrompt = true;
-      const size = await clack.select({
-        message: "Select image size",
+      const aspectRatio = await clack.select({
+        message: "Select aspect ratio",
         options: [
-          { value: "1024x1024", label: "Square (1024x1024)" },
-          { value: "1792x1024", label: "Landscape (1792x1024)" },
-          { value: "1024x1792", label: "Portrait (1024x1792)" },
+          { value: "1:1", label: "Square (1:1) - 1024x1024" },
+          { value: "16:9", label: "Landscape (16:9) - 1344x768" },
+          { value: "9:16", label: "Portrait (9:16) - 768x1344" },
+          { value: "4:3", label: "Landscape (4:3) - 1184x864" },
+          { value: "3:4", label: "Portrait (3:4) - 864x1184" },
+          { value: "21:9", label: "Ultrawide (21:9) - 1536x672" },
         ],
-        initialValue: "1024x1024",
+        initialValue: "1:1",
       });
       this.isInPrompt = false;
 
-      if (clack.isCancel(size)) {
+      if (clack.isCancel(aspectRatio)) {
         console.log(chalk.yellow("\nGeneration cancelled"));
         console.log();
         return;
@@ -687,19 +694,10 @@ export class TuiCommand extends CommandRunner {
           if (aiProvider === "google") {
             // Google implementation (copied/simplified)
             const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:predict`;
-            const [w, h] = (size as string).split("x").map(Number);
-
-            // Aspect ratio logic
-            let aspectRatio = "1:1";
-            if (w && h) {
-              const gcd = (a: number, b: number): number => (b === 0 ? a : gcd(b, a % b));
-              const divisor = gcd(w, h);
-              aspectRatio = `${w / divisor}:${h / divisor}`;
-            }
 
             const body = {
               instances: [{ prompt }],
-              parameters: { sampleCount: 1, aspectRatio },
+              parameters: { sampleCount: 1, aspectRatio: aspectRatio as string },
             };
 
             const response = await fetch(apiUrl, {
@@ -714,14 +712,6 @@ export class TuiCommand extends CommandRunner {
             imageBuffer = Buffer.from(result.predictions[0].bytesBase64Encoded, "base64");
           } else if (aiProvider === "openrouter") {
             // OPENROUTER (Via Fetch / Chat Completions)
-            const [w, h] = (size as string).split("x").map(Number);
-            let aspectRatio = "1:1";
-            if (w && h) {
-              const gcd = (a: number, b: number): number => (b === 0 ? a : gcd(b, a % b));
-              const divisor = gcd(w, h);
-              aspectRatio = `${w / divisor}:${h / divisor}`;
-            }
-
             const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
               method: "POST",
               headers: {
@@ -741,7 +731,7 @@ export class TuiCommand extends CommandRunner {
                 // Specific to Gemini/OpenRouter multimodal
                 modalities: ["image", "text"],
                 image_config: {
-                  aspect_ratio: aspectRatio,
+                  aspect_ratio: aspectRatio as string,
                 },
               }),
             });
@@ -776,11 +766,22 @@ export class TuiCommand extends CommandRunner {
             const openai = createOpenAI({ apiKey });
             const imageModel = openai.image(model);
 
+            // Map aspect ratio back to size for OpenAI SDK
+            const sizeMap: Record<string, string> = {
+              "1:1": "1024x1024",
+              "16:9": "1792x1024",
+              "9:16": "1024x1792",
+              "4:3": "1792x1024",
+              "3:4": "1024x1792",
+              "21:9": "1792x1024",
+            };
+            const openaiSize = sizeMap[aspectRatio as string] || "1024x1024";
+
             const { image } = await generateImage({
               model: imageModel,
               prompt: prompt as string,
               n: 1,
-              size: size as any,
+              size: openaiSize as any,
             });
             imageBuffer = Buffer.from(image.base64, "base64");
           }

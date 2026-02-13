@@ -25,6 +25,8 @@ interface GenerateCommandOptions {
   size?: string;
   sourceImage?: string;
   model?: string;
+  aspectRatio?: string;
+  imageSize?: string;
   json?: boolean;
 }
 
@@ -37,7 +39,16 @@ interface GenerateCommandOptions {
 export class GenerateCommand extends CommandRunner {
   async run(inputs: string[], options: GenerateCommandOptions): Promise<void> {
     await requireOnboarding();
-    const { prompt, output, size = "1024x1024", sourceImage, model, json = false } = options;
+    const {
+      prompt,
+      output,
+      size = "1024x1024",
+      sourceImage,
+      model,
+      aspectRatio,
+      imageSize,
+      json = false,
+    } = options;
 
     // ─────────────────────────────────────────────────────────────────────
     // Validation
@@ -126,9 +137,14 @@ export class GenerateCommand extends CommandRunner {
     try {
       let imageBuffer: Buffer;
 
-      // Determine models to use
+      // Determine models to try
       const primaryModel = model || getPrimaryModel(aiProvider);
-      const fallbackModels = model ? [] : getFallbackModels(aiProvider);
+      const fallbackModels = getFallbackModels(aiProvider);
+
+      // Pass aspect ratio and image size to generation
+      const imageConfig: { aspectRatio?: string; imageSize?: string } = {};
+      if (aspectRatio) imageConfig.aspectRatio = aspectRatio;
+      if (imageSize) imageConfig.imageSize = imageSize;
 
       if (aiProvider === "openrouter") {
         imageBuffer = await this.generateWithFallback(
@@ -138,7 +154,8 @@ export class GenerateCommand extends CommandRunner {
           "openrouter",
           { primary: primaryModel, fallbacks: fallbackModels },
           spinner,
-          sourceImageData
+          sourceImageData,
+          imageConfig
         );
       } else if (aiProvider === "openai") {
         if (sourceImageData) {
@@ -239,7 +256,8 @@ export class GenerateCommand extends CommandRunner {
       warn: (msg: string) => void;
       isSpinning?: boolean;
     } | null,
-    sourceImage?: string
+    sourceImageData?: string,
+    imageConfig?: { aspectRatio?: string; imageSize?: string }
   ): Promise<Buffer> {
     const modelsToTry = [config.primary, ...config.fallbacks].filter(
       (model): model is string => model !== null
@@ -262,7 +280,8 @@ export class GenerateCommand extends CommandRunner {
           apiKey,
           provider,
           model,
-          sourceImage
+          sourceImageData,
+          imageConfig
         );
 
         if (spinner && i > 0) {
@@ -315,24 +334,47 @@ export class GenerateCommand extends CommandRunner {
     apiKey: string,
     provider: "openrouter" | "openai" | "google",
     model: string,
-    sourceImage?: string
+    sourceImageData?: string,
+    imageConfig?: { aspectRatio?: string; imageSize?: string }
   ): Promise<Buffer> {
     // ─────────────────────────────────────────────────────────────────────
     // OPENROUTER (Via Fetch / Chat Completions)
     // ─────────────────────────────────────────────────────────────────────
     if (provider === "openrouter") {
-      // Parse aspect ratio from size
-      const [width, height] = size.split("x").map(Number);
-      let aspectRatio = "1:1";
-      if (width && height) {
-        const gcd = (a: number, b: number): number => (b === 0 ? a : gcd(b, a % b));
-        const divisor = gcd(width, height);
-        aspectRatio = `${width / divisor}:${height / divisor}`;
+      // Calculate aspect ratio from size if not provided
+      let aspectRatio = imageConfig?.aspectRatio || "1:1";
+      if (!imageConfig?.aspectRatio) {
+        const [width, height] = size.split("x").map(Number);
+        if (width && height) {
+          const gcd = (a: number, b: number): number => (b === 0 ? a : gcd(b, a % b));
+          const divisor = gcd(width, height);
+          const calculated = `${width / divisor}:${height / divisor}`;
+
+          // Map calculated ratio to supported OpenRouter ratios
+          const supportedRatios: Record<string, string> = {
+            "1:1": "1:1",
+            "2:3": "2:3",
+            "3:2": "3:2",
+            "3:4": "3:4",
+            "4:3": "4:3",
+            "4:5": "4:5",
+            "5:4": "5:4",
+            "9:16": "9:16",
+            "16:9": "16:9",
+            "21:9": "21:9",
+            // Common unsupported ratios mapped to closest supported
+            "7:4": "16:9", // 1792x1024
+            "4:7": "9:16", // 1024x1792
+            "64:27": "21:9", // ultrawide variants
+          };
+
+          aspectRatio = supportedRatios[calculated] || "1:1";
+        }
       }
 
-      // Build content array based on whether we have a source image
-      let content: any;
-      if (sourceImage) {
+      // Build messages array
+      let content: Array<{ type: string; text?: string; image_url?: { url: string } }> | string;
+      if (sourceImageData) {
         // Image-to-image generation: include source image in content
         content = [
           {
@@ -342,7 +384,7 @@ export class GenerateCommand extends CommandRunner {
           {
             type: "image_url",
             image_url: {
-              url: sourceImage,
+              url: sourceImageData,
             },
           },
         ];
@@ -369,10 +411,14 @@ export class GenerateCommand extends CommandRunner {
           ],
           // Specific to Gemini/OpenRouter multimodal
           modalities: ["image", "text"],
-          image_config: {
-            aspect_ratio: aspectRatio,
-            // image_size: "4K", // Optional based on snippet, but maybe risky for all models
-          },
+          ...(aspectRatio || imageConfig?.imageSize
+            ? {
+                image_config: {
+                  ...(aspectRatio ? { aspect_ratio: aspectRatio } : {}),
+                  ...(imageConfig?.imageSize ? { image_size: imageConfig.imageSize } : {}),
+                },
+              }
+            : {}),
         }),
       });
 
@@ -462,6 +508,24 @@ export class GenerateCommand extends CommandRunner {
       "Specific model to use (provider-dependent). Use model ID from your provider's list. Note: Not all models support reference images (--source-image).",
   })
   parseModel(val: string): string {
+    return val;
+  }
+
+  @Option({
+    flags: "--aspect-ratio <ratio>",
+    description:
+      "Aspect ratio for generated image (OpenRouter only). Supported: 1:1, 2:3, 3:2, 3:4, 4:3, 4:5, 5:4, 9:16, 16:9, 21:9",
+  })
+  parseAspectRatio(val: string): string {
+    return val;
+  }
+
+  @Option({
+    flags: "--image-size <size>",
+    description:
+      "Image resolution size (OpenRouter only). Supported: 1K (standard), 2K (higher), 4K (highest)",
+  })
+  parseImageSize(val: string): string {
     return val;
   }
 
